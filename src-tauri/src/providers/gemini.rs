@@ -187,13 +187,17 @@ pub fn parse_quota(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
 // ---------------------------------------------------------------------------
 
 /// fetchAvailableModels response → one window per shared gemini-* bucket
-/// (in practice they share a single daily bucket; we report the worst).
+/// (in practice they share a single rolling bucket; we report the worst).
+/// The bucket's resetTime is rolling-window semantics: the server leaves it
+/// in the past while the fraction keeps decaying (observed 2026-09-02), so a
+/// stale resetTime is dropped — showing "等待刷新…" forever is worse than "—".
 pub fn parse_models(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
     let v: Value = serde_json::from_str(body).map_err(|_| ProviderError::ParseFailed)?;
     let models = v
         .get("models")
         .and_then(|m| m.as_object())
         .ok_or(ProviderError::ParseFailed)?;
+    let now = super::now_secs();
     let mut worst: Option<QuotaWindow> = None;
     for (key, m) in models.iter() {
         if !key.starts_with("gemini-") {
@@ -207,9 +211,12 @@ pub fn parse_models(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
             continue;
         };
         let used = (1.0 - remaining) * 100.0;
-        let resets_at = q.get("resetTime").and_then(super::parse_reset);
+        let resets_at = q
+            .get("resetTime")
+            .and_then(super::parse_reset)
+            .filter(|t| *t > now); // stale rolling-window markers carry no info
         let w = QuotaWindow {
-            label: "日".into(),
+            label: "滚动".into(),
             used_percent: used,
             resets_at,
         };
@@ -363,23 +370,36 @@ mod tests {
 
     #[test]
     fn parses_antigravity_models_shared_bucket() {
-        // real 2026-09 capture shape: all gemini-* share one daily bucket
+        // real 2026-09 capture shape: all gemini-* share one bucket
         let body = r#"{
           "models": {
             "chat_20706": { "isInternal": true, "quotaInfo": { "remainingFraction": 1 } },
             "gemini-2.5-pro": { "displayName": "Gemini 2.5 Pro",
-              "quotaInfo": { "remainingFraction": 0.9084101, "resetTime": "2026-09-02T20:43:09Z" } },
+              "quotaInfo": { "remainingFraction": 0.9084101, "resetTime": "2099-09-02T20:43:09Z" } },
             "gemini-3.6-flash-medium": { "displayName": "Gemini 3.6 Flash (Medium)",
-              "quotaInfo": { "remainingFraction": 0.9084101, "resetTime": "2026-09-02T20:43:09Z" } },
+              "quotaInfo": { "remainingFraction": 0.9084101, "resetTime": "2099-09-02T20:43:09Z" } },
             "claude-opus-4-6-thinking": { "displayName": "Claude Opus 4.6 (Thinking)",
-              "quotaInfo": { "remainingFraction": 1, "resetTime": "2026-09-02T22:05:03Z" } }
+              "quotaInfo": { "remainingFraction": 1, "resetTime": "2099-09-02T22:05:03Z" } }
           }
         }"#;
         let w = parse_models(body).unwrap();
         assert_eq!(w.len(), 1);
-        assert_eq!(w[0].label, "日");
+        assert_eq!(w[0].label, "滚动");
         assert!((w[0].used_percent - 9.16).abs() < 0.1);
-        assert!(w[0].resets_at.is_some());
+        assert!(w[0].resets_at.is_some(), "future resetTime survives");
+    }
+
+    #[test]
+    fn antigravity_stale_reset_time_is_dropped() {
+        // rolling-window marker left in the past (observed live 2026-09-02):
+        // must not produce an eternal "等待刷新…" countdown
+        let body = r#"{
+          "models": {
+            "gemini-a": { "quotaInfo": { "remainingFraction": 0.5, "resetTime": "2020-01-01T00:00:00Z" } }
+          }
+        }"#;
+        let w = parse_models(body).unwrap();
+        assert_eq!(w[0].resets_at, None);
     }
 
     #[test]
@@ -387,12 +407,12 @@ mod tests {
         let body = r#"{
           "models": {
             "gemini-a": { "quotaInfo": { "remainingFraction": 0.9 } },
-            "gemini-b": { "quotaInfo": { "remainingFraction": 0.2, "resetTime": 1786000000 } }
+            "gemini-b": { "quotaInfo": { "remainingFraction": 0.2, "resetTime": 4000000000 } }
           }
         }"#;
         let w = parse_models(body).unwrap();
         assert!((w[0].used_percent - 80.0).abs() < 0.01);
-        assert_eq!(w[0].resets_at, Some(1786000000));
+        assert_eq!(w[0].resets_at, Some(4000000000));
     }
 
     #[test]
