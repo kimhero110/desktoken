@@ -24,8 +24,8 @@ const CRED_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
 };
 
 fn cred_path() -> Result<std::path::PathBuf, ProviderError> {
-    let home = std::env::var("USERPROFILE").map_err(|_| ProviderError::CredentialMissing)?;
-    let p = std::path::Path::new(&home).join(".claude/.credentials.json");
+    let home = crate::credentials::home().ok_or(ProviderError::CredentialMissing)?;
+    let p = home.join(".claude/.credentials.json");
     if p.exists() {
         Ok(p)
     } else {

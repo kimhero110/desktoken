@@ -1,14 +1,20 @@
-// DeskToken — generic HTTP fetch + jq-lite JSON path extraction.
+// QuotaBar — generic HTTP fetch + jq-lite JSON path extraction.
 // Used by the custom-provider engine and key verification. HTTP spec per PLAN.md:
-// connect 5s / total 15s hard timeout; 1MB response cap.
+// connect 5s / total 15s hard timeout; 1MB response cap; global client connection pool.
 use serde_json::Value;
+use std::sync::OnceLock;
 
-pub fn http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())
+static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+pub fn http_client() -> &'static reqwest::Client {
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("QuotaBar/0.1.0 (Windows NT; x64)")
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
 }
 
 /// jq-lite dotted path: "data.limits.0.percentage" (array index as numeric segment).
@@ -48,7 +54,7 @@ pub async fn get_with_auth(
 
 /// GET endpoint with arbitrary headers; returns (status, body truncated to 1MB).
 pub async fn get_json(endpoint: &str, headers: &[(&str, &str)]) -> Result<(u16, String), String> {
-    let client = http_client()?;
+    let client = http_client();
     let mut req = client.get(endpoint).header("Accept", "application/json");
     for (name, value) in headers {
         req = req.header(*name, *value);
@@ -58,56 +64,47 @@ pub async fn get_json(endpoint: &str, headers: &[(&str, &str)]) -> Result<(u16, 
         .await
         .map_err(|e| format!("网络错误: {}", e))?;
     let status = resp.status().as_u16();
-    let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
-    let truncated: String = body.chars().take(1_000_000).collect();
-    Ok((status, truncated))
+    let text = read_capped_body(resp, 1024 * 1024).await?;
+    Ok((status, text))
 }
 
-/// POST form-encoded body; returns (status, body truncated to 1MB).
+/// POST form data; returns (status, body truncated to 1MB).
 pub async fn post_form(endpoint: &str, form: &[(&str, &str)]) -> Result<(u16, String), String> {
-    let client = http_client()?;
+    let client = http_client();
     let resp = client
         .post(endpoint)
-        .header("Content-Type", "application/x-www-form-urlencoded")
         .header("Accept", "application/json")
         .form(form)
         .send()
         .await
         .map_err(|e| format!("网络错误: {}", e))?;
     let status = resp.status().as_u16();
-    let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
-    Ok((status, body.chars().take(1_000_000).collect()))
+    let text = read_capped_body(resp, 1024 * 1024).await?;
+    Ok((status, text))
 }
 
-/// Verify a custom provider definition: fetch + try the window mappings.
-pub async fn verify_custom(
-    def: &crate::settings::CustomProvider,
-    key: &str,
-) -> Result<String, String> {
-    let (status, body) =
-        get_with_auth(&def.endpoint, &def.auth_header, &def.auth_prefix, key).await?;
-    if status == 401 || status == 403 {
-        return Err(format!("HTTP {} — key 无效或无权限", status));
-    }
-    if status == 429 {
-        return Err("HTTP 429 — 被限流，稍后再试".into());
-    }
-    if !(200..300).contains(&status) {
-        return Err(format!("HTTP {}", status));
-    }
-    let json: Value =
-        serde_json::from_str(&body).map_err(|e| format!("响应不是合法 JSON: {}", e))?;
-    let mut lines = vec![];
-    for w in &def.windows {
-        let used = json_path(&json, &w.used_path).and_then(as_f64);
-        let limit = json_path(&json, &w.limit_path).and_then(as_f64);
-        match (used, limit) {
-            (Some(u), Some(l)) => lines.push(format!("✓ [{}] used={} limit={}", w.label, u, l)),
-            _ => lines.push(format!("✗ [{}] 路径未取到数值", w.label)),
+/// Read response body with a maximum byte limit (1MB default).
+async fn read_capped_body(resp: reqwest::Response, max_bytes: usize) -> Result<String, String> {
+    use tokio::io::AsyncReadExt;
+    let mut stream = tokio_util::io::StreamReader::new(
+        resp.bytes_stream()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+    );
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = stream
+            .read(&mut chunk)
+            .await
+            .map_err(|e| format!("读取响应失败: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        let take = n.min(max_bytes.saturating_sub(buf.len()));
+        buf.extend_from_slice(&chunk[..take]);
+        if buf.len() >= max_bytes {
+            break;
         }
     }
-    if def.windows.is_empty() {
-        lines.push("（未配置窗口映射，仅验证连通性）".into());
-    }
-    Ok(lines.join("\n"))
+    String::from_utf8(buf).map_err(|e| format!("UTF-8 解码失败: {}", e))
 }

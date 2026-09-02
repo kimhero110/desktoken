@@ -2,7 +2,8 @@
 // manual API keys via OS keyring. Read-only by default (see PLAN.md §3/§5).
 use serde::Serialize;
 
-pub const KEYRING_SERVICE: &str = "desktoken";
+pub const KEYRING_SERVICE: &str = "quotabar";
+pub const LEGACY_KEYRING_SERVICE: &str = "desktoken";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProviderCredInfo {
@@ -16,7 +17,7 @@ pub struct ProviderCredInfo {
     pub supports_manual_key: bool,
 }
 
-fn home() -> Option<std::path::PathBuf> {
+pub fn home() -> Option<std::path::PathBuf> {
     std::env::var("USERPROFILE")
         .ok()
         .map(std::path::PathBuf::from)
@@ -36,6 +37,11 @@ pub fn keyring_get(account: &str) -> Option<String> {
     keyring::Entry::new(KEYRING_SERVICE, account)
         .ok()
         .and_then(|e| e.get_password().ok())
+        .or_else(|| {
+            keyring::Entry::new(LEGACY_KEYRING_SERVICE, account)
+                .ok()
+                .and_then(|e| e.get_password().ok())
+        })
 }
 
 pub fn keyring_set(account: &str, secret: &str) -> Result<(), String> {

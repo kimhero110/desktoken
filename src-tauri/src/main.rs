@@ -31,7 +31,7 @@ fn apply_noactivate(window: &WebviewWindow) {
         let dir = std::path::PathBuf::from(
             std::env::var("APPDATA").unwrap_or_else(|_| ".".into()),
         )
-        .join("desktoken");
+        .join("quotabar");
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::OpenOptions::new()
             .create(true)
@@ -334,7 +334,7 @@ pub(crate) fn rustlog(msg: String) {
         .replace(&credentials::keyring_get("glm").unwrap_or_default(), "***")
         .replace(&credentials::keyring_get("kimi").unwrap_or_default(), "***");
     let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()))
-        .join("desktoken");
+        .join("quotabar");
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::OpenOptions::new()
         .create(true)
