@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <title>QuotaBar</title>
@@ -64,11 +64,11 @@
 </head>
 <body>
 <div id="bar" data-tauri-drag-region>
-  <div id="strip"><span class="dot" id="strip-dot"></span><span id="strip-title">QuotaBar HUD</span></div>
+  <div id="strip"><span class="dot" id="strip-dot"></span><span id="strip-title">QuotaBar</span></div>
   <div id="notice"></div>
   <div id="empty">
-    <div class="t1" id="empty-t1">No providers configured</div>
-    <div class="t2" id="empty-t2">Right-click → Settings to enable providers</div>
+    <div class="t1" id="empty-t1">还没有配置任何平台</div>
+    <div class="t2" id="empty-t2">右键 → 设置，添加或启用平台</div>
   </div>
   <div id="providers"></div>
 </div>
@@ -80,26 +80,26 @@
   const emptyEl = document.getElementById("empty");
   const snapshots = new Map(); // provider_id -> snapshot
 
-  // ---- i18n localization dictionary ----
+  // ---- i18n (system language; backend error text arrives ready-to-show) ----
   const isZh = (navigator.language || '').startsWith('zh');
   const I18N = {
-    stripTitle: isZh ? "QuotaBar 用量看板" : "QuotaBar HUD",
+    stripTitle: "QuotaBar",
     emptyT1: isZh ? "还没有配置任何平台" : "No providers configured",
-    emptyT2: isZh ? "右键 → 设置，添加或启用平台" : "Right-click → Settings to enable providers",
+    emptyT2: isZh ? "右键 → 设置，添加或启用平台" : "Right-click → Settings to add providers",
     refreshing: isZh ? "等待刷新…" : "Refreshing…",
     justNow: isZh ? "刚刚" : "just now",
     minAgo: isZh ? " 分钟前" : "m ago",
     hourAgo: isZh ? " 小时前" : "h ago",
-    autoEnabledNotice: isZh ? "已自动发现并启用：" : "Auto-detected and enabled: ",
-    authError: isZh ? "认证失败，请在设置中检查 API Key" : "Auth failed, check API Key in Settings",
-    rateLimited: isZh ? "速率受限 (429)，已触发退避重试" : "Rate limited (429), backing off",
+    autoEnabled: (names) => isZh
+      ? `已自动启用 ${names.join(" · ")}，可在设置中关闭`
+      : `Auto-enabled: ${names.join(", ")} — disable in Settings`,
+    noCred: isZh ? "未检测到 CLI 凭据，右键 → 设置手动添加" : "No CLI credentials detected — right-click → Settings",
   };
-
   document.getElementById("strip-title").textContent = I18N.stripTitle;
   document.getElementById("empty-t1").textContent = I18N.emptyT1;
   document.getElementById("empty-t2").textContent = I18N.emptyT2;
 
-  // ---- formatting helpers ----
+  // ---- formatting helpers (design spec: 43m / 2.1h / 3d4h / — / 等待刷新…) ----
   function fmtCountdown(resetsAt) {
     if (!resetsAt) return "—";
     const d = resetsAt - Date.now() / 1000;
@@ -116,84 +116,89 @@
     return Math.round(d / 3600) + I18N.hourAgo;
   }
   function isStale(fetchedAt) {
-    return Date.now() / 1000 - fetchedAt > 600; // 10min: mild stale
+    return Date.now() / 1000 - fetchedAt > 600; // mild stale tier
   }
+  function fillClass(pct) { return pct >= 90 ? "fill danger" : pct >= 70 ? "fill warn" : "fill"; }
+  function esc(t) { const d = document.createElement("div"); d.textContent = String(t); return d.innerHTML; }
 
+  // ---- renderer ----
   function render() {
-    const list = Array.from(snapshots.values());
-    if (list.length === 0) {
-      emptyEl.style.display = "block";
-      providersEl.innerHTML = "";
-      return;
-    }
-    emptyEl.style.display = "none";
-
-    providersEl.innerHTML = list.map(s => {
+    providersEl.innerHTML = "";
+    emptyEl.style.display = snapshots.size === 0 ? "" : "none";
+    let worst = 0;
+    for (const [id, s] of snapshots) {
+      const div = document.createElement("div");
+      div.className = "provider";
       const stale = isStale(s.fetched_at);
-      const dotCls = s.error ? "dot stale" : (stale ? "dot stale" : "dot");
-      const head = `
-        <div class="header">
-          <span class="${dotCls}"></span>
-          <span class="name">${escapeHtml(s.provider_name)}</span>
-          <span class="freshness">${fmtFresh(s.fetched_at, !!s.error)}</span>
-        </div>
-      `;
-      if (s.error) {
-        let errDesc = s.error;
-        if (s.error.toLowerCase().includes("unauthorized") || s.error.toLowerCase().includes("invalid")) {
-          errDesc = I18N.authError;
-        } else if (s.error.toLowerCase().includes("429") || s.error.toLowerCase().includes("rate")) {
-          errDesc = I18N.rateLimited;
-        }
-        return `<div class="provider" data-id="${s.provider_id}">${head}<div class="errline">${escapeHtml(errDesc)}</div></div>`;
+      let html = `<div class="header"><span class="dot${stale || s.error ? " stale" : ""}"></span>${esc(s.provider_name)}<span class="freshness">${fmtFresh(s.fetched_at, !!s.error)}</span></div>`;
+      if (s.error && s.windows.length === 0) {
+        // backend ProviderError text is final (design spec error mapping table)
+        html += `<div class="errline">${esc(s.error)}</div>`;
       }
-      const rows = s.windows.map(w => {
-        const pct = Math.max(0, Math.min(100, Math.round(w.used_percent)));
-        let fillCls = "fill";
-        if (pct >= 90) fillCls += " danger";
-        else if (pct >= 70) fillCls += " warn";
-        return `
-          <div class="row">
-            <span class="label">${escapeHtml(w.label)}</span>
-            <div class="bar"><div class="${fillCls}" style="width: ${pct}%"></div></div>
-            <span class="pct">${pct}%</span>
-            <span class="cd">${fmtCountdown(w.resets_at)}</span>
-          </div>
-        `;
-      }).join("");
-      return `<div class="provider" data-id="${s.provider_id}">${head}${rows}</div>`;
-    }).join("");
+      for (const w of s.windows) {
+        worst = Math.max(worst, w.used_percent);
+        const dim = stale ? " dimmed" : "";
+        html += `<div class="row${dim}" title="${esc(s.provider_name)} · ${esc(w.label)} 窗口&#10;已用 ${Math.round(w.used_percent)}%&#10;来源: ${s.source === "official" ? "官方接口" : s.source === "manual_key" ? "手动 key" : "响应头估算"}${s.plan ? " · " + esc(s.plan) : ""}">
+          <span class="label">${esc(w.label)}</span>
+          <div class="bar"><div class="${fillClass(w.used_percent)}" style="width:${w.used_percent.toFixed(1)}%"></div></div>
+          <span class="pct">${Math.round(w.used_percent)}%</span>
+          <span class="cd">${fmtCountdown(w.resets_at)}</span>
+        </div>`;
+      }
+      div.innerHTML = html;
+      div.setAttribute("aria-label", `${s.provider_name} ${s.windows.map(w => `${w.label}已用${Math.round(w.used_percent)}%`).join(" ")}`);
+      providersEl.appendChild(div);
+    }
+    // strip status dot + ambient border alert follow worst window (design spec)
+    const dot = document.getElementById("strip-dot");
+    dot.style.background = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "#3FB950";
+    bar.style.borderColor = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "rgba(255,255,255,0.08)";
+    refit();
   }
 
-  function escapeHtml(str) {
-    return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // ---- layout ownership (frontend owns height; kills the dead zone) ----
+  function refit() {
+    const mini = document.body.classList.contains("mini");
+    invoke("autosize", { height: mini ? 26 : bar.offsetHeight });
   }
+  window.addEventListener("load", refit);
 
-  // ---- Tauri events ----
-  listen("quota://snapshot", (event) => {
-    const snap = event.payload;
-    snapshots.set(snap.provider_id, snap);
+  // ---- events ----
+  listen("quota://snapshot", (ev) => {
+    const s = ev.payload;
+    snapshots.set(s.provider_id, s);
     render();
   });
-
-  listen("tos-accepted", (event) => {
-    const names = event.payload || [];
-    if (names.length > 0) {
-      const notice = document.getElementById("notice");
-      notice.textContent = I18N.autoEnabledNotice + names.join(", ");
-      notice.style.display = "block";
-      setTimeout(() => { notice.style.display = "none"; }, 3500);
-    }
+  listen("mini-mode", (ev) => {
+    document.body.classList.toggle("mini", ev.payload);
+    refit();
+  });
+  listen("refit", refit);
+  listen("settings-changed", (ev) => {
+    bar.style.background = `rgba(18, 18, 22, ${ev.payload.opacity})`;
+  });
+  // E4: first-run auto-enable notification (3s temporary strip)
+  listen("tos-accepted", (ev) => {
+    const names = ev.payload || [];
+    const el = document.getElementById("notice");
+    el.textContent = names.length ? I18N.autoEnabled(names) : I18N.noCred;
+    el.style.display = "";
+    refit();
+    setTimeout(() => { el.style.display = "none"; refit(); }, 3000);
   });
 
-  // Right-click context menu
-  window.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    invoke("context_menu");
-  });
-
-  // Tick countdowns every 30s
+  // countdown + freshness refresh every 30s (design: no per-second jumps)
   setInterval(render, 30000);
+
+  // ---- drag & menu (NOACTIVATE-proof manual drag lives in Rust) ----
+  bar.addEventListener("mousedown", (e) => { if (e.button === 0) invoke("begin_drag"); });
+  bar.addEventListener("contextmenu", (e) => { e.preventDefault(); invoke("context_menu"); });
+
+  // ---- init ----
+  invoke("get_settings").then((s) => {
+    bar.style.background = `rgba(18, 18, 22, ${s.opacity})`;
+    if (s.mini_mode) document.body.classList.add("mini");
+  });
 </script>
 </body>
 </html>
