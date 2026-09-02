@@ -83,6 +83,26 @@ pub async fn post_form(endpoint: &str, form: &[(&str, &str)]) -> Result<(u16, St
     Ok((status, text))
 }
 
+/// POST JSON body with Bearer auth; returns (status, body truncated to 1MB).
+pub async fn post_json(
+    endpoint: &str,
+    token: &str,
+    body: &Value,
+) -> Result<(u16, String), String> {
+    let client = http_client();
+    let resp = client
+        .post(endpoint)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| format!("网络错误: {}", e))?;
+    let status = resp.status().as_u16();
+    let text = read_capped_body(resp, 1024 * 1024).await?;
+    Ok((status, text))
+}
+
 /// Read response body with a maximum byte limit (1MB default).
 async fn read_capped_body(resp: reqwest::Response, max_bytes: usize) -> Result<String, String> {
     use futures_util::TryStreamExt;

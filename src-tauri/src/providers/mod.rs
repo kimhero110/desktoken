@@ -3,6 +3,7 @@
 pub mod claude;
 pub mod codex;
 pub mod custom;
+pub mod gemini;
 pub mod glm;
 pub mod kimi;
 

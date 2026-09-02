@@ -29,6 +29,9 @@ async fn run_codex() -> Result<QuotaSnapshot, providers::ProviderError> {
 async fn run_claude() -> Result<QuotaSnapshot, providers::ProviderError> {
     providers::claude::fetch_snapshot().await
 }
+async fn run_gemini() -> Result<QuotaSnapshot, providers::ProviderError> {
+    providers::gemini::fetch_snapshot().await
+}
 
 fn spawn_provider<F, Fut>(
     app: AppHandle,
@@ -84,6 +87,10 @@ pub fn start(app: AppHandle) {
         // Claude polling is clamped to >= 10 min (PLAN.md ToS decision);
         // 429 backoff doubles from this floor (max 8x).
         spawn_provider(app.clone(), "claude".into(), "Claude".into(), 600, || run_claude());
+    }
+    if enabled("gemini") {
+        // Gemini polling is clamped to >= 5 min (PLAN.md decision #12).
+        spawn_provider(app.clone(), "gemini".into(), "Gemini".into(), 300, || run_gemini());
     }
     for def in s.custom_providers {
         let period = def.poll_minutes.max(1) * 60;
