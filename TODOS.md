@@ -9,7 +9,7 @@
 - [ ] 浅色主题（跟随系统；半透明浅色需单独的对比度方案）
 - [ ] Provider 拖拽排序
 - [ ] macOS / Linux 移植（凭据路径与 keychain 读取方式不同，CodexBar 已有参考）
-- [ ] Antigravity provider（Gemini 个人版迁移后的额度通道）
+- [x] ~~Antigravity provider~~（已完成 2026-09-02：Gemini provider 内置 Antigravity 通道——凭据管理器只读 + daily-cloudcode-pa fetchAvailableModels + UA 门禁）
 
 ## 工程遗留（低优先级但已知）
 - [ ] OAuth 写回后 re-apply 原文件显式 ACL（当前各家 CLI 未设显式 ACL，无害；协议文档已标注）

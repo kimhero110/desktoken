@@ -133,10 +133,10 @@ struct QuotaWindow {
 
 | 阶段 | 内容 | 验收标准 |
 |---|---|---|
-| M1 | Tauri 窗口骨架 + **spike A**（NOACTIVATE+acrylic+transparent+drag 四件套同框；记事本打字中拖动/右键不丢焦点；ToS 对话框临时激活）+ settings + 托盘 | 悬浮条可拖动、半透明、置顶、不抢焦点 |
-| M2 | Provider 框架（trait+ProviderError+sanitize）+ Kimi + GLM（glaze 双端点自动试） | 两家真实数据显示；设置页粘 key+验证；每 provider ≥3 golden fixture（含 1 畸形）+ wiremock 4 场景通过 |
-| M3 | OAuth 公共路径（6 步协议）+ Codex + Claude + **spike B**（模拟 CLI 高频读写对抗测试+实证 CLI 锁行为） | 装了 CLI 的机器自动出数据；refresh 状态机每边一测+rename 故障注入；与 CodexBar 输出比对一致 |
-| M4 | Gemini（含 403 降级提示） | 五家全部可用 |
+| M1 ✅ | Tauri 窗口骨架 + **spike A**（NOACTIVATE+acrylic+transparent+drag 四件套同框；记事本打字中拖动/右键不丢焦点；ToS 对话框临时激活）+ settings + 托盘 | 悬浮条可拖动、半透明、置顶、不抢焦点 |
+| M2 ✅ | Provider 框架（trait+ProviderError+sanitize）+ Kimi + GLM（glaze 双端点自动试） | 两家真实数据显示；设置页粘 key+验证；每 provider ≥3 golden fixture（含 1 畸形）+ wiremock 4 场景通过 |
+| M3 ✅ | OAuth 公共路径（6 步协议，oauth.rs）+ Codex + Claude + **spike B**（CLI 读写对抗：单飞/compare-before-write/invalid_grant 重读/rename 故障注入/原子写风暴） | 装了 CLI 的机器自动出数据；refresh 状态机每边一测+rename 故障注入；与 CodexBar 输出比对一致（CodexBar 未装，字段级一致） |
+| M4 ✅ | Gemini（双通道：gemini-cli 经典流 + Antigravity 凭据管理器只读 + daily fetchAvailableModels；403 降级提示） | 五家全部可用（真机：Kimi/GLM/Codex/Gemini 出数，Claude 待登录） |
 | M5 | 打磨+分发：告警色/ toast（AUMID+实机实测）/ 右键菜单 / 开机自启 / GitHub Actions tauri-action NSIS 管线 + checksums + provenance / README 十章 / 杀软实测 / 72h soak（内存增量 <50MB）/ 15 项手工 QA 清单 | 可日常使用的发布物 |
 
 ## 7. 风险与对策

@@ -68,6 +68,12 @@
     <label for="ct" style="margin:0">迷你模式（收缩为状态细条）</label>
   </div>
 </div>
+<div class="field">
+  <div class="row">
+    <input type="checkbox" id="autostart" />
+    <label for="autostart" style="margin:0">开机自动启动</label>
+  </div>
+</div>
 
 <h2>平台凭据</h2>
 <div id="providers"></div>
@@ -223,7 +229,9 @@
   // ---- init ----
   invoke("get_settings").then((s) => {
     op.value = s.opacity; wsel.value = String(s.width); ct.checked = s.mini_mode; showOp();
+    $("autostart").checked = !!s.autostart;
   });
+  $("autostart").addEventListener("change", () => invoke("set_autostart", { enabled: $("autostart").checked }));
   loadProviders();
   loadCustoms();
 </script>

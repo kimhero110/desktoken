@@ -17,10 +17,12 @@ fn is_zh_locale() -> bool {
 }
 mod settings;
 mod credentials;
+mod diagnostics;
 mod fetch;
 mod oauth;
 mod poller;
 mod providers;
+mod updater_check;
 
 use settings::Settings;
 use tauri::{
@@ -136,8 +138,8 @@ fn clamp_position(window: &WebviewWindow, s: &Settings) -> tauri::Result<()> {
 // ---------------------------------------------------------------------------
 // Tray
 // ---------------------------------------------------------------------------
-fn tray_icon_image() -> tauri::image::Image<'static> {
-    // 16x16 simple green dot
+fn tray_icon_image_colored(r: u8, g: u8, b: u8) -> tauri::image::Image<'static> {
+    // 16x16 simple dot
     let mut rgba = vec![0u8; 16 * 16 * 4];
     for py in 0..16 {
         for px in 0..16 {
@@ -145,18 +147,54 @@ fn tray_icon_image() -> tauri::image::Image<'static> {
             let dy = py as f64 - 7.5;
             if dx * dx + dy * dy <= 36.0 {
                 let i = (py * 16 + px) * 4;
-                rgba[i] = 0x3F; // R
-                rgba[i + 1] = 0xB9; // G (#3FB950 per design tokens)
-                rgba[i + 2] = 0x50; // B
-                rgba[i + 3] = 0xFF; // A
+                rgba[i] = r;
+                rgba[i + 1] = g;
+                rgba[i + 2] = b;
+                rgba[i + 3] = 0xFF;
             }
         }
     }
     tauri::image::Image::new_owned(rgba, 16, 16)
 }
 
+pub(crate) fn tray_icon_image() -> tauri::image::Image<'static> {
+    tray_icon_image_colored(0x3F, 0xB9, 0x50) // #3FB950 per design tokens
+}
+
+pub(crate) fn tray_icon_image_alert() -> tauri::image::Image<'static> {
+    tray_icon_image_colored(0xF8, 0x51, 0x49) // #F85149
+}
+
+// ---------------------------------------------------------------------------
+// "立即刷新" cooldown (design: 30s, menu item greyed while cooling)
+// ---------------------------------------------------------------------------
+static LAST_MANUAL_REFRESH: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
+
+fn refresh_cooling_down() -> bool {
+    LAST_MANUAL_REFRESH
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+        .map(|t| t.elapsed() < std::time::Duration::from_secs(30))
+        .unwrap_or(false)
+}
+
+fn trigger_refresh() -> bool {
+    if refresh_cooling_down() {
+        return false;
+    }
+    if let Ok(mut g) = LAST_MANUAL_REFRESH.lock() {
+        *g = Some(std::time::Instant::now());
+    }
+    poller::refresh_now();
+    true
+}
+
 fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let refresh = MenuItemBuilder::with_id("refresh", if is_zh_locale() { "立即刷新" } else { "Refresh Now" }).build(app)?;
+    let refresh = MenuItemBuilder::with_id("refresh", if is_zh_locale() { "立即刷新" } else { "Refresh Now" })
+        .enabled(!refresh_cooling_down())
+        .build(app)?;
     let mini = CheckMenuItemBuilder::with_id("mini_mode", if is_zh_locale() { "迷你模式" } else { "Mini Mode" }).build(app)?;
     let diag = MenuItemBuilder::with_id("diag", if is_zh_locale() { "复制诊断信息" } else { "Copy Diagnostics" }).build(app)?;
     let check_update = MenuItemBuilder::with_id("check_update", if is_zh_locale() { "检查更新" } else { "Check for Updates" }).build(app)?;
@@ -192,9 +230,31 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
             }
         }
         "refresh" => {
-            // M2: trigger full provider fetch. M1: no-op.
+            trigger_refresh();
         }
-        _ => {} // diag / check_update / report / settings: M2+ milestones
+        "diag" => {
+            let text = diagnostics::collect(&poller::last_states());
+            use tauri_plugin_clipboard_manager::ClipboardExt;
+            let ok = app.clipboard().write_text(text).is_ok();
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app
+                .notification()
+                .builder()
+                .title("QuotaBar")
+                .body(if ok { "诊断信息已复制（已脱敏）" } else { "复制失败" })
+                .show();
+        }
+        "check_update" => {
+            updater_check::maybe_check(app.clone(), true);
+        }
+        "report" => {
+            use tauri_plugin_opener::OpenerExt;
+            let _ = app.opener().open_url(
+                "https://github.com/kimhero110/desktoken/issues/new/choose",
+                None::<&str>,
+            );
+        }
+        _ => {}
     }
 }
 
@@ -253,6 +313,7 @@ fn accept_tos(app: tauri::AppHandle) -> Result<(), String> {
         reveal_main(&w);
     }
     poller::start(app.clone());
+    updater_check::maybe_check(app.clone(), false);
     let _ = app.emit_to("main", "tos-accepted", names);
     if let Some(t) = app.get_webview_window("tos") {
         let _ = t.close();
@@ -263,6 +324,55 @@ fn accept_tos(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn decline_tos(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// Autostart (HKCU Run key) + misc commands
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "windows")]
+fn apply_autostart(enable: bool) -> Result<(), String> {
+    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+    let (key, _) = hkcu
+        .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
+        .map_err(|e| e.to_string())?;
+    if enable {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        key.set_value("QuotaBar", &exe.to_string_lossy().to_string())
+            .map_err(|e| e.to_string())?;
+    } else {
+        let _ = key.delete_value("QuotaBar");
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_autostart(_enable: bool) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    apply_autostart(enabled)?;
+    let mut s = settings::load();
+    s.autostart = enabled;
+    settings::save(&s).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn copy_diagnostics(app: tauri::AppHandle) -> Result<(), String> {
+    let text = diagnostics::collect(&poller::last_states());
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    // allowlist: only our own release/issue pages
+    if !url.starts_with("https://github.com/kimhero110/desktoken") {
+        return Err("不允许的链接".into());
+    }
+    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -512,7 +622,17 @@ async fn verify_provider(provider_id: String, custom_id: Option<String>) -> Resu
 
 // ---------------------------------------------------------------------------
 fn main() {
+    // AUMID: makes Windows toasts attributable to QuotaBar (E5/M5).
+    #[cfg(target_os = "windows")]
+    unsafe {
+        let wide: Vec<u16> = "com.quotabar.app\0".encode_utf16().collect();
+        windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(wide.as_ptr());
+    }
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // second instance: show existing window, no focus steal
             if let Some(w) = app.get_webview_window("main") {
@@ -536,12 +656,17 @@ fn main() {
             save_custom_provider,
             delete_custom_provider,
             verify_provider,
+            set_autostart,
+            copy_diagnostics,
+            open_url,
+            updater_check::skip_version,
+            updater_check::current_version,
         ])
         .setup(|app| {
             let s = settings::load();
 
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("DeskToken")
+                .title("QuotaBar")
                 .inner_size(s.width, WIN_H)
                 .resizable(false)
                 .maximizable(false)
@@ -570,14 +695,18 @@ fn main() {
 
             // tray (E2)
             let menu = build_app_menu(app.handle())?;
-            TrayIconBuilder::with_id("main-tray")
+            let tray = TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon_image())
-                .tooltip("DeskToken")
+                .tooltip("QuotaBar")
                 .menu(&menu)
                 // NOTE: no .on_menu_event here — Tauri dispatches menu events to
                 // BOTH the tray handler and the global Builder::on_menu_event,
                 // which would double-toggle. Global handler is the single entry.
                 .build(app)?;
+            poller::register_tray(tray);
+
+            // sync autostart registry key with persisted setting
+            let _ = apply_autostart(s.autostart);
 
             // First-run ToS gate: zero network before consent. Until the user
             // agrees, the bar hides and the poller stays off; the ToS window
@@ -585,6 +714,8 @@ fn main() {
             if s.tos_accepted {
                 reveal_main(&window);
                 poller::start(app.handle().clone());
+                // E1: version check only after consent (zero network before)
+                updater_check::maybe_check(app.handle().clone(), false);
             } else {
                 open_tos_window(app.handle());
             }

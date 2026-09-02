@@ -1,0 +1,42 @@
+name: Bug 报告
+description: QuotaBar 出了问题？用这个模板报告
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告！**不要粘贴任何 API key / token**。诊断信息请用应用内「右键 → 复制诊断信息」（已自动脱敏）。
+  - type: input
+    id: version
+    attributes:
+      label: QuotaBar 版本
+      description: 右键 → 设置 或诊断信息第一行可见，例如 v0.1.0
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: 涉及平台
+      options:
+        - Kimi
+        - GLM 智谱
+        - Codex
+        - Claude
+        - Gemini / Antigravity
+        - 自定义监视
+        - 窗口/托盘/其他
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 期望行为 vs 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: diag
+    attributes:
+      label: 诊断信息
+      description: 右键悬浮条 → 复制诊断信息，粘贴到这里（已脱敏，请勿自行添加 token）
+      render: text

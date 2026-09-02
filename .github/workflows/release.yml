@@ -10,6 +10,8 @@ jobs:
   release:
     permissions:
       contents: write
+      attestations: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -38,25 +40,43 @@ jobs:
           cd src-tauri
           cargo tauri build
 
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd src-tauri/target/release
+          sha256sum quotabar.exe bundle/nsis/*.exe > checksums.txt
+          cat checksums.txt
+
+      - name: Build provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            src-tauri/target/release/quotabar.exe
+            src-tauri/target/release/bundle/nsis/*.exe
+
       - name: Upload Artifact to GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: 'QuotaBar ${{ github.ref_name }}'
           body: |
-            ## 📊 QuotaBar Release ${{ github.ref_name }}
-            
-            ### 🌟 What's New
+            ## QuotaBar Release ${{ github.ref_name }}
+
+            ### What's New
             - Non-intrusive acrylic desktop floating status bar for Windows 10/11
-            - Real-time tracking for Claude 5-hour rolling window, Kimi, Codex, and GLM
+            - Real-time tracking for Kimi, GLM, Codex, Claude, Gemini/Antigravity
             - Universal Custom Provider JSON engine
             - Zero telemetry, 100% local credentials storage
-            
-            ### 💾 Installation
-            - **`QuotaBar_x64-setup.exe`**: Standard Windows installer (NSIS)
-            - **`quotabar.exe`**: Portable standalone executable (no installation required)
+
+            ### Installation
+            - **`QuotaBar_x64-setup.exe`**: Standard Windows installer (NSIS, includes WebView2 bootstrapper)
+            - **`quotabar.exe`**: Portable standalone executable
+
+            ### Verify
+            `checksums.txt` contains SHA-256 hashes; build provenance attestation is on the *Attestations* tab.
           files: |
             src-tauri/target/release/quotabar.exe
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

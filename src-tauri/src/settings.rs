@@ -42,6 +42,16 @@ pub struct Settings {
     pub skipped_version: Option<String>,
     #[serde(default)]
     pub custom_providers: Vec<CustomProvider>,
+    /// E1: last version-check epoch + latest seen version (24h cache)
+    #[serde(default)]
+    pub update_checked_at: Option<i64>,
+    #[serde(default)]
+    pub latest_version: Option<String>,
+    /// E5 toast dedup: "provider/label" -> resets_at of the alerted cycle
+    #[serde(default)]
+    pub toast_alerted: std::collections::HashMap<String, i64>,
+    #[serde(default)]
+    pub autostart: bool,
 }
 
 impl Default for Settings {
@@ -58,6 +68,10 @@ impl Default for Settings {
             poll_intervals: Default::default(),
             skipped_version: None,
             custom_providers: vec![],
+            update_checked_at: None,
+            latest_version: None,
+            toast_alerted: Default::default(),
+            autostart: false,
         }
     }
 }
