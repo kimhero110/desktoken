@@ -1,0 +1,52 @@
+name: Release QuotaBar
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Build and Release with Tauri Action
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'QuotaBar ${{ github.ref_name }}'
+          releaseBody: |
+            ## 📊 QuotaBar Release ${{ github.ref_name }}
+            
+            ### What's New
+            - Real-time AI coding quota & rate limit floating status bar
+            - Support for Claude 5h window, Kimi, Codex, GLM, and Custom Provider Engine
+            - Acrylic translucent non-activating window on Windows 10/11
+            
+            ### Download
+            Download the installer or portable standalone executable below.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
