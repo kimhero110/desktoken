@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
+<title>QuotaBar — Notice / 知悉</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -26,16 +27,33 @@
 </style>
 </head>
 <body>
-  <h1>使用前请知悉</h1>
-  <p>① DeskToken 使用本机<b>官方 CLI 的登录凭据</b>，轮询各平台<b>非官方用量接口</b>，并自动读取已检测到的 CLI 凭据。</p>
-  <p>② 这可能<b>违反平台服务条款</b>，理论上存在账号被限制的风险（保守轮询已降低该风险）。</p>
-  <p>③ token 过期时会自动刷新并<b>写回凭据文件</b>（与官方 CLI 行为一致）。所有数据仅存本机，绝不上传。继续即表示你了解并接受。</p>
+  <h1 id="tos-title">QuotaBar — Before You Begin</h1>
+  <div id="tos-body"></div>
   <div class="btns">
-    <button id="quit">退出</button>
-    <button id="agree">同意并继续</button>
+    <button id="quit">Quit / 退出</button>
+    <button id="agree">Agree & Continue / 同意并继续</button>
   </div>
 <script>
   const { invoke } = window.__TAURI__.core;
+  const isZh = (navigator.language || '').startsWith('zh');
+
+  const contentZh = `
+    <p>① QuotaBar 使用本机<b>官方 CLI 的登录凭据</b>，轮询各平台<b>非官方用量接口</b>，并自动读取已检测到的 CLI 凭据。</p>
+    <p>② 这可能<b>违反平台服务条款</b>，理论上存在账号被限制的风险（保守轮询已尽可能降低该风险）。</p>
+    <p>③ Token 过期时会自动刷新并<b>写回凭据文件</b>（与官方 CLI 行为一致）。所有数据仅存本机，绝不上传。继续即表示你了解并接受。</p>
+  `;
+
+  const contentEn = `
+    <p>① QuotaBar uses local <b>official CLI credentials</b> to monitor LLM usage endpoints and automatically reads detected CLI configs.</p>
+    <p>② Polling internal usage endpoints may <b>violate platform Terms of Service</b> with theoretical rate-limiting risks (conservative backoff intervals applied).</p>
+    <p>③ Expired tokens are automatically refreshed and <b>written back atomically</b> matching official CLI behavior. All data stays 100% on your local machine.</p>
+  `;
+
+  document.getElementById("tos-title").textContent = isZh ? "QuotaBar — 使用前请知悉" : "QuotaBar — Before You Begin";
+  document.getElementById("tos-body").innerHTML = isZh ? contentZh : contentEn;
+  document.getElementById("agree").textContent = isZh ? "同意并继续" : "Agree & Continue";
+  document.getElementById("quit").textContent = isZh ? "退出" : "Quit";
+
   document.getElementById("agree").addEventListener("click", () => invoke("accept_tos"));
   document.getElementById("quit").addEventListener("click", () => invoke("decline_tos"));
 </script>

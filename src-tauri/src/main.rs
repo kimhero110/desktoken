@@ -1,3 +1,9 @@
+
+fn is_zh_locale() -> bool {
+    let lang = std::env::var("LANG").unwrap_or_default().to_lowercase();
+    let sys_lang = std::env::var("LC_ALL").unwrap_or_default().to_lowercase();
+    lang.starts_with("zh") || sys_lang.starts_with("zh") || cfg!(target_os = "windows")
+}
 // DeskToken — M1 Lane A: window skeleton + spike A (NOACTIVATE / acrylic / drag / no-focus-steal)
 //                 + tray + single-instance + position clamp (work-area aware)
 mod settings;
@@ -141,13 +147,13 @@ fn tray_icon_image() -> tauri::image::Image<'static> {
 }
 
 fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let refresh = MenuItemBuilder::with_id("refresh", "立即刷新").build(app)?;
-    let mini = CheckMenuItemBuilder::with_id("mini_mode", "迷你模式").build(app)?;
-    let diag = MenuItemBuilder::with_id("diag", "复制诊断信息").build(app)?;
-    let check_update = MenuItemBuilder::with_id("check_update", "检查更新").build(app)?;
-    let report = MenuItemBuilder::with_id("report", "在 GitHub 报告问题").build(app)?;
-    let settings_item = MenuItemBuilder::with_id("settings", "设置").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+    let refresh = MenuItemBuilder::with_id("refresh", if is_zh_locale() { "立即刷新" } else { "Refresh Now" }).build(app)?;
+    let mini = CheckMenuItemBuilder::with_id("mini_mode", if is_zh_locale() { "迷你模式" } else { "Mini Mode" }).build(app)?;
+    let diag = MenuItemBuilder::with_id("diag", if is_zh_locale() { "复制诊断信息" } else { "Copy Diagnostics" }).build(app)?;
+    let check_update = MenuItemBuilder::with_id("check_update", if is_zh_locale() { "检查更新" } else { "Check for Updates" }).build(app)?;
+    let report = MenuItemBuilder::with_id("report", if is_zh_locale() { "在 GitHub 报告问题" } else { "Report Issue on GitHub" }).build(app)?;
+    let settings_item = MenuItemBuilder::with_id("settings", if is_zh_locale() { "设置..." } else { "Settings..." }).build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", if is_zh_locale() { "退出" } else { "Quit" }).build(app)?;
     MenuBuilder::new(app)
         .items(&[
             &refresh,
