@@ -44,6 +44,44 @@ pub fn keyring_get(account: &str) -> Option<String> {
         })
 }
 
+/// Read a credential owned by another application, by its exact Windows
+/// Credential Manager target name (e.g. Antigravity's "gemini:antigravity").
+/// READ-ONLY: we never write to foreign credentials (PLAN.md 凭据只读优先).
+/// Raw CredReadW: foreign blobs may be UTF-8 bytes (Antigravity) rather than
+/// the UTF-16 the keyring crate assumes — decode UTF-8 first, UTF-16 fallback.
+#[cfg(target_os = "windows")]
+pub fn read_foreign_cred(target: &str) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Security::Credentials::{CredFree, CredReadW, CRED_TYPE_GENERIC};
+    let wide: Vec<u16> = std::ffi::OsStr::new(target)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let mut pcred: *mut windows_sys::Win32::Security::Credentials::CREDENTIALW =
+            std::ptr::null_mut();
+        if CredReadW(wide.as_ptr(), CRED_TYPE_GENERIC, 0, &mut pcred) == 0 {
+            return None;
+        }
+        let c = &*pcred;
+        let blob = std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize);
+        let text = String::from_utf8(blob.to_vec()).ok().or_else(|| {
+            let u16s: Vec<u16> = blob
+                .chunks_exact(2)
+                .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                .collect();
+            String::from_utf16(&u16s).ok()
+        });
+        CredFree(pcred as *mut _);
+        text.map(|s| s.trim_end_matches('\0').to_string())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_foreign_cred(_target: &str) -> Option<String> {
+    None
+}
+
 pub fn keyring_set(account: &str, secret: &str) -> Result<(), String> {
     keyring::Entry::new(KEYRING_SERVICE, account)
         .map_err(|e| e.to_string())?
@@ -107,6 +145,15 @@ pub fn detect() -> Vec<ProviderCredInfo> {
                         None
                     }
                 })
+            });
+            // Gemini fallback: Antigravity IDE stores the same Google OAuth
+            // credential in Windows Credential Manager ("gemini:antigravity").
+            let found = found.or_else(|| {
+                if id == "gemini" && read_foreign_cred("gemini:antigravity").is_some() {
+                    Some("Antigravity IDE（凭据管理器）".to_string())
+                } else {
+                    None
+                }
             });
             match found {
                 Some(p) => ProviderCredInfo {

@@ -104,16 +104,21 @@ pub fn jwt_exp(token: &str) -> Option<EpochSecs> {
 }
 
 /// (access_token, refresh_token, expiry epoch secs) from a credential doc.
+/// Expiry may be a number (secs or ms per spec) or an RFC3339 string
+/// (e.g. Antigravity's keyring blob uses "2026-09-03T01:23:45Z").
 fn extract(doc: &Value, spec: &OAuthFileSpec) -> (Option<String>, Option<String>, Option<EpochSecs>) {
     let access = json_path_str(doc, spec.access_path).map(|s| s.to_string());
     let refresh = json_path_str(doc, spec.refresh_path).map(|s| s.to_string());
     let expires = match spec.expires_path {
-        Some(p) => fetch::json_path(doc, p)
-            .and_then(fetch::as_f64)
-            .map(|x| match spec.expiry_unit {
-                ExpiryUnit::Seconds => x as i64,
-                ExpiryUnit::Millis => (x / 1000.0) as i64,
-            }),
+        Some(p) => {
+            let v = fetch::json_path(doc, p);
+            v.and_then(fetch::as_f64)
+                .map(|x| match spec.expiry_unit {
+                    ExpiryUnit::Seconds => x as i64,
+                    ExpiryUnit::Millis => (x / 1000.0) as i64,
+                })
+                .or_else(|| v.and_then(crate::providers::parse_reset))
+        }
         None => access.as_deref().and_then(jwt_exp),
     };
     (access, refresh, expires)
@@ -288,6 +293,103 @@ where
     // Write-back failure is non-fatal: use the fresh token in memory
     // (PendingWriteback lite; PLAN.md eng review #3).
     let _ = write_back(path, &doc, rename_attempts, rename_delay_ms);
+    Ok((rr.access_token, "official"))
+}
+
+/// Resolve an access token from a FOREIGN keyring credential (e.g.
+/// Antigravity's "gemini:antigravity" in Windows Credential Manager).
+///
+/// Strictly read-only on the foreign credential (PLAN.md 凭据只读优先):
+/// when the token is expired we refresh with its refresh_token and cache the
+/// derived pair under OUR OWN keyring account (service "quotabar",
+/// `derived:<target>`), never touching the original entry. The owning app
+/// keeps managing its own credential; worst case our cache goes stale and we
+/// refresh once more.
+pub async fn resolve_oauth_keyring<F, Fut>(
+    target: &str,
+    spec: &OAuthFileSpec,
+    do_refresh: F,
+) -> Result<(String, &'static str), ProviderError>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<RefreshResult, RefreshFailure>>,
+{
+    let cache_account = format!("derived:{}", target);
+    let read_foreign = || -> Result<(String, Value), ProviderError> {
+        let raw = crate::credentials::read_foreign_cred(target)
+            .ok_or(ProviderError::CredentialMissing)?;
+        let doc = serde_json::from_str::<Value>(&raw)
+            .map_err(|_| ProviderError::CredentialCorrupt { torn: false })?;
+        Ok((raw, doc))
+    };
+    let read_cache = || -> Option<(String, EpochSecs)> {
+        let raw = crate::credentials::keyring_get(&cache_account)?;
+        let v = serde_json::from_str::<Value>(&raw).ok()?;
+        let t = v.get("access_token").and_then(|x| x.as_str())?.to_string();
+        let e = v.get("expires_at").and_then(fetch::as_f64)? as i64;
+        Some((t, e))
+    };
+
+    // Fast path: foreign token fresh
+    let (_raw, doc) = read_foreign()?;
+    let (access, refresh, expires) = extract(&doc, spec);
+    if let (Some(t), true) = (&access, is_fresh(expires)) {
+        return Ok((t.clone(), "official"));
+    }
+    // Our derived cache still valid?
+    if let Some((t, e)) = read_cache() {
+        if e > now_secs() + SKEW_SECS {
+            return Ok((t, "official"));
+        }
+    }
+    let Some(rt) = refresh else {
+        return Err(ProviderError::AuthExpired);
+    };
+
+    // Single-flight per credential target
+    let mutex = path_mutex(Path::new(target));
+    let _guard = mutex.lock().await;
+
+    // Re-check both sources inside the lock (IDE may have refreshed; another
+    // poller round may have populated our cache)
+    let (_raw2, doc2) = read_foreign()?;
+    let (a2, r2, e2) = extract(&doc2, spec);
+    if let (Some(t), true) = (&a2, is_fresh(e2)) {
+        return Ok((t.clone(), "official"));
+    }
+    if let Some((t, e)) = read_cache() {
+        if e > now_secs() + SKEW_SECS {
+            return Ok((t, "official"));
+        }
+    }
+    let rt = r2.unwrap_or(rt);
+
+    let rr = match do_refresh(rt).await {
+        Ok(rr) => rr,
+        Err(RefreshFailure::InvalidGrant) => {
+            // The IDE may have rotated the pair: re-read once before judging
+            if let Ok((_, doc3)) = read_foreign() {
+                let (a3, _, e3) = extract(&doc3, spec);
+                if let (Some(t), true) = (&a3, is_fresh(e3)) {
+                    return Ok((t.clone(), "official"));
+                }
+            }
+            return Err(ProviderError::AuthExpired);
+        }
+        Err(RefreshFailure::Network) => return Err(ProviderError::Network),
+        Err(RefreshFailure::Parse) => return Err(ProviderError::ParseFailed),
+    };
+
+    // Cache the derived token in OUR keyring namespace (best-effort).
+    let expiry = rr
+        .expires_in_secs
+        .map(|s| now_secs() + s)
+        .unwrap_or(now_secs() + 3600);
+    let cache_doc = serde_json::json!({
+        "access_token": rr.access_token,
+        "expires_at": expiry,
+    });
+    let _ = crate::credentials::keyring_set(&cache_account, &cache_doc.to_string());
     Ok((rr.access_token, "official"))
 }
 
@@ -591,6 +693,23 @@ pub(crate) mod tests {
         };
         let (_, _, exp) = extract(&doc, &spec);
         assert_eq!(exp, Some(1786000000));
+    }
+
+    #[test]
+    fn extract_parses_rfc3339_expiry() {
+        // Antigravity keyring blob: expiry as RFC3339 string
+        let doc = serde_json::json!({"token": {"access_token": "t", "refresh_token": "r",
+                                               "expiry": "2026-09-06T04:00:00Z"}});
+        let spec = OAuthFileSpec {
+            access_path: "token.access_token",
+            refresh_path: "token.refresh_token",
+            expires_path: Some("token.expiry"),
+            expiry_unit: ExpiryUnit::Seconds,
+        };
+        let (a, r, e) = extract(&doc, &spec);
+        assert_eq!(a.as_deref(), Some("t"));
+        assert_eq!(r.as_deref(), Some("r"));
+        assert!(e.unwrap() > 1_700_000_000);
     }
 
     #[test]

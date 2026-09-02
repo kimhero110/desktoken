@@ -89,11 +89,26 @@ pub async fn post_json(
     token: &str,
     body: &Value,
 ) -> Result<(u16, String), String> {
+    post_json_ua(endpoint, token, None, body).await
+}
+
+/// POST JSON with Bearer auth and an optional User-Agent override
+/// (Antigravity's daily-cloudcode-pa endpoint gates on it).
+pub async fn post_json_ua(
+    endpoint: &str,
+    token: &str,
+    user_agent: Option<&str>,
+    body: &Value,
+) -> Result<(u16, String), String> {
     let client = http_client();
-    let resp = client
+    let mut req = client
         .post(endpoint)
         .bearer_auth(token)
-        .header("Accept", "application/json")
+        .header("Accept", "application/json");
+    if let Some(ua) = user_agent {
+        req = req.header("User-Agent", ua);
+    }
+    let resp = req
         .json(body)
         .send()
         .await
