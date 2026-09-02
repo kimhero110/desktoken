@@ -1,5 +1,5 @@
 [package]
-name = "desktoken"
+name = "quotabar"
 version = "0.1.0"
 description = "AI coding quota floating bar"
 edition = "2021"

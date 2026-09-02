@@ -64,12 +64,27 @@ impl Default for Settings {
 
 pub fn settings_path() -> PathBuf {
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(base).join("quotabar").join("settings.json")
+}
+
+fn legacy_settings_path() -> PathBuf {
+    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
     PathBuf::from(base).join("desktoken").join("settings.json")
 }
 
 /// Load settings; corrupt file → backup + defaults (per Error Registry).
+/// One-time migration: DeskToken-era settings dir → QuotaBar.
 pub fn load() -> Settings {
     let path = settings_path();
+    if !path.exists() {
+        let legacy = legacy_settings_path();
+        if let Ok(raw) = std::fs::read_to_string(&legacy) {
+            if let Ok(s) = serde_json::from_str::<Settings>(&raw) {
+                let _ = save(&s); // persist to the new location
+                return s;
+            }
+        }
+    }
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Settings::default();
     };
