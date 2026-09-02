@@ -16,8 +16,7 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis",
-      "exe"
+      "nsis"
     ],
     "icon": [
       "icons/icon.ico"

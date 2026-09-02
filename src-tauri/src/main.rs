@@ -1,11 +1,20 @@
+// DeskToken — M1 Lane A: window skeleton + spike A (NOACTIVATE / acrylic / drag / no-focus-steal)
+//                 + tray + single-instance + position clamp (work-area aware)
 
+/// UI language detection for the tray menu. On Windows, env LANG is usually
+/// unset — ask the OS for the user's UI language instead (LANG_CHINESE = 0x04).
+#[cfg(target_os = "windows")]
+fn is_zh_locale() -> bool {
+    let langid = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
+    langid & 0x3FF == 0x04
+}
+
+#[cfg(not(target_os = "windows"))]
 fn is_zh_locale() -> bool {
     let lang = std::env::var("LANG").unwrap_or_default().to_lowercase();
     let sys_lang = std::env::var("LC_ALL").unwrap_or_default().to_lowercase();
-    lang.starts_with("zh") || sys_lang.starts_with("zh") || cfg!(target_os = "windows")
+    lang.starts_with("zh") || sys_lang.starts_with("zh")
 }
-// DeskToken — M1 Lane A: window skeleton + spike A (NOACTIVATE / acrylic / drag / no-focus-steal)
-//                 + tray + single-instance + position clamp (work-area aware)
 mod settings;
 mod credentials;
 mod fetch;
