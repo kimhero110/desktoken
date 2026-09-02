@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    background: #121216;
+    color: rgba(255, 255, 255, 0.92);
+    padding: 20px;
+    user-select: none; -webkit-user-select: none;
+  }
+  h1 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+  p { font-size: 12px; line-height: 1.7; margin-bottom: 10px; color: rgba(255, 255, 255, 0.75); }
+  p b { color: rgba(255, 255, 255, 0.92); font-weight: 600; }
+  .btns { display: flex; gap: 10px; margin-top: 18px; }
+  button {
+    flex: 1; height: 32px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12);
+    font-size: 12px; font-family: inherit; cursor: pointer;
+  }
+  #agree { background: #3FB950; border-color: #3FB950; color: #0b0d0f; font-weight: 600; }
+  #agree:hover { filter: brightness(1.1); }
+  #quit { background: transparent; color: rgba(255,255,255,0.65); }
+  #quit:hover { background: rgba(255,255,255,0.06); }
+</style>
+</head>
+<body>
+  <h1>使用前请知悉</h1>
+  <p>① DeskToken 使用本机<b>官方 CLI 的登录凭据</b>，轮询各平台<b>非官方用量接口</b>，并自动读取已检测到的 CLI 凭据。</p>
+  <p>② 这可能<b>违反平台服务条款</b>，理论上存在账号被限制的风险（保守轮询已降低该风险）。</p>
+  <p>③ token 过期时会自动刷新并<b>写回凭据文件</b>（与官方 CLI 行为一致）。所有数据仅存本机，绝不上传。继续即表示你了解并接受。</p>
+  <div class="btns">
+    <button id="quit">退出</button>
+    <button id="agree">同意并继续</button>
+  </div>
+<script>
+  const { invoke } = window.__TAURI__.core;
+  document.getElementById("agree").addEventListener("click", () => invoke("accept_tos"));
+  document.getElementById("quit").addEventListener("click", () => invoke("decline_tos"));
+</script>
+</body>
+</html>

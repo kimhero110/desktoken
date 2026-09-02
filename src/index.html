@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --bg: rgba(18, 18, 22, 0.72);
+    --border: rgba(255, 255, 255, 0.08);
+    --text: rgba(255, 255, 255, 0.92);
+    --text-dim: rgba(255, 255, 255, 0.55);
+    --track: rgba(255, 255, 255, 0.12);
+    --green: #3FB950;
+    --yellow: #D29922;
+    --red: #F85149;
+    --stale: #8B949E;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: transparent; overflow: hidden; }
+  body {
+    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    color: var(--text);
+    user-select: none; -webkit-user-select: none;
+  }
+  #bar {
+    border-radius: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    cursor: move;
+  }
+  .provider { margin-bottom: 10px; }
+  .provider:last-child { margin-bottom: 0; }
+  .header { display: flex; align-items: center; height: 18px; font-size: 12px; font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; }
+  .dot.stale { background: var(--stale); }
+  .freshness { margin-left: auto; font-size: 10px; font-weight: 400; color: var(--text-dim); }
+  .row {
+    display: flex; align-items: center; height: 16px; margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .label { width: 44px; font-size: 10px; color: var(--text-dim); }
+  .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--track); margin: 0 6px; overflow: hidden; }
+  .fill { height: 100%; border-radius: 3px; background: var(--green); transition: width 300ms ease-out, background 150ms; }
+  .fill.warn { background: var(--yellow); }
+  .fill.danger { background: var(--red); }
+  .pct { width: 32px; text-align: right; font-size: 11px; }
+  .cd { width: 44px; text-align: right; font-size: 11px; color: var(--text-dim); margin-left: 6px; }
+  .errline { font-size: 10px; color: var(--stale); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .dimmed { opacity: 0.5; }
+  #strip { display: none; height: 24px; line-height: 24px; font-size: 11px; font-weight: 600; color: var(--text); }
+  #strip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin: 0 6px 1px 0; vertical-align: middle; }
+  #notice {
+    display: none; font-size: 10px; color: var(--text-dim); line-height: 1.5;
+    padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+  #empty { padding: 12px 6px; text-align: center; }
+  #empty .t1 { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  #empty .t2 { font-size: 10px; color: var(--text-dim); }
+  body.mini #bar > .provider, body.mini #bar > #empty, body.mini #bar > #notice { display: none; }
+  body.mini #bar { padding: 0 10px; }
+  body.mini #strip { display: block; }
+</style>
+</head>
+<body>
+<div id="bar" data-tauri-drag-region>
+  <div id="strip"><span class="dot" id="strip-dot"></span>Token 用量看板</div>
+  <div id="notice"></div>
+  <div id="empty">
+    <div class="t1">还没有配置任何平台</div>
+    <div class="t2">右键 → 设置，添加或启用平台</div>
+  </div>
+  <div id="providers"></div>
+</div>
+<script>
+  const { invoke } = window.__TAURI__.core;
+  const listen = window.__TAURI__.event.listen;
+  const bar = document.getElementById("bar");
+  const providersEl = document.getElementById("providers");
+  const emptyEl = document.getElementById("empty");
+  const snapshots = new Map(); // provider_id -> snapshot
+
+  // ---- formatting helpers (design spec: 43m / 2.1h / 3d4h / — / 等待刷新…) ----
+  function fmtCountdown(resetsAt) {
+    if (!resetsAt) return "—";
+    const d = resetsAt - Date.now() / 1000;
+    if (d <= 0) return "等待刷新…";
+    if (d < 3600) return Math.max(1, Math.round(d / 60)) + "m";
+    if (d < 86400) return (Math.round(d / 360) / 10).toFixed(1).replace(/\.0$/, "") + "h";
+    return Math.floor(d / 86400) + "d" + Math.round((d % 86400) / 3600) + "h";
+  }
+  function fmtFresh(fetchedAt, hasError) {
+    if (hasError) return "";
+    const d = Math.max(0, Date.now() / 1000 - fetchedAt);
+    if (d < 90) return "刚刚";
+    if (d < 3600) return Math.round(d / 60) + " 分钟前";
+    return Math.round(d / 3600) + " 小时前";
+  }
+  function isStale(fetchedAt) {
+    return Date.now() / 1000 - fetchedAt > 600; // 10min: mild stale (3-tier refined in M3)
+  }
+  function fillClass(pct) { return pct >= 90 ? "fill danger" : pct >= 70 ? "fill warn" : "fill"; }
+
+  // ---- renderer ----
+  function render() {
+    providersEl.innerHTML = "";
+    emptyEl.style.display = snapshots.size === 0 ? "" : "none";
+    let worst = 0;
+    for (const [id, s] of snapshots) {
+      const div = document.createElement("div");
+      div.className = "provider" + (s.error && !s.windows.length ? "" : "");
+      const stale = isStale(s.fetched_at);
+      let html = `<div class="header"><span class="dot${stale ? " stale" : ""}"></span>${esc(s.provider_name)}<span class="freshness">${fmtFresh(s.fetched_at, !!s.error)}</span></div>`;
+      if (s.error && s.windows.length === 0) {
+        html += `<div class="errline">${esc(s.error)}</div>`;
+      }
+      for (const w of s.windows) {
+        worst = Math.max(worst, w.used_percent);
+        const dim = stale ? " dimmed" : "";
+        html += `<div class="row${dim}" title="${esc(s.provider_name)} · ${esc(w.label)} 窗口&#10;已用 ${Math.round(w.used_percent)}%&#10;来源: ${s.source === "official" ? "官方接口" : s.source === "manual_key" ? "手动 key" : "响应头估算"}${s.plan ? " · " + esc(s.plan) : ""}">
+          <span class="label">${esc(w.label)}</span>
+          <div class="bar"><div class="${fillClass(w.used_percent)}" style="width:${w.used_percent.toFixed(1)}%"></div></div>
+          <span class="pct">${Math.round(w.used_percent)}%</span>
+          <span class="cd">${fmtCountdown(w.resets_at)}</span>
+        </div>`;
+      }
+      div.innerHTML = html;
+      div.setAttribute("aria-label", `${s.provider_name} ${s.windows.map(w => `${w.label}已用${Math.round(w.used_percent)}%`).join(" ")}`);
+      providersEl.appendChild(div);
+    }
+    // strip status dot follows worst window (ambient alert)
+    const dot = document.getElementById("strip-dot");
+    dot.style.background = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "#3FB950";
+    // ambient border alert
+    bar.style.borderColor = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "rgba(255,255,255,0.08)";
+    refit();
+  }
+  function esc(t) { const d = document.createElement("div"); d.textContent = String(t); return d.innerHTML; }
+
+  // ---- layout ownership (frontend owns height) ----
+  function refit() {
+    const mini = document.body.classList.contains("mini");
+    invoke("autosize", { height: mini ? 26 : bar.offsetHeight });
+  }
+  window.addEventListener("load", refit);
+
+  // ---- events ----
+  listen("quota://snapshot", (ev) => {
+    const s = ev.payload;
+    snapshots.set(s.provider_id, s);
+    render();
+  });
+  listen("mini-mode", (ev) => {
+    document.body.classList.toggle("mini", ev.payload);
+    refit();
+  });
+  listen("refit", refit);
+  listen("settings-changed", (ev) => {
+    bar.style.background = `rgba(18, 18, 22, ${ev.payload.opacity})`;
+  });
+  // E4: first-run auto-enable notification (3s temporary strip)
+  listen("tos-accepted", (ev) => {
+    const names = ev.payload;
+    const el = document.getElementById("notice");
+    el.textContent = names.length
+      ? `已自动启用 ${names.join(" · ")}，可在设置中关闭`
+      : "未检测到 CLI 凭据，右键 → 设置手动添加";
+    el.style.display = "";
+    refit();
+    setTimeout(() => { el.style.display = "none"; refit(); }, 3000);
+  });
+
+  // countdown + freshness refresh every 30s (design: no per-second jumps)
+  setInterval(render, 30000);
+
+  // ---- drag & menu ----
+  bar.addEventListener("mousedown", (e) => { if (e.button === 0) invoke("begin_drag"); });
+  bar.addEventListener("contextmenu", (e) => { e.preventDefault(); invoke("context_menu"); });
+
+  // ---- init ----
+  invoke("get_settings").then((s) => {
+    bar.style.background = `rgba(18, 18, 22, ${s.opacity})`;
+    if (s.mini_mode) document.body.classList.add("mini");
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    background: #1b1b20; color: rgba(255,255,255,0.92);
+    padding: 20px; font-size: 13px;
+  }
+  h1 { font-size: 16px; margin-bottom: 4px; }
+  h2 { font-size: 13px; margin: 20px 0 10px; color: rgba(255,255,255,0.85); border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px; }
+  .field { margin-bottom: 14px; }
+  label { display: block; color: rgba(255,255,255,0.55); font-size: 11px; margin-bottom: 5px; }
+  input[type=range] { width: 100%; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; padding: 6px 8px; background: #2a2a32; color: inherit;
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 4px; font-size: 12px;
+    font-family: inherit;
+  }
+  textarea { font-family: Consolas, monospace; resize: vertical; }
+  button {
+    padding: 5px 12px; background: #2d4f8f; color: #fff; border: 0; border-radius: 4px;
+    cursor: pointer; font-size: 12px;
+  }
+  button.ghost { background: #2a2a32; border: 1px solid rgba(255,255,255,0.15); }
+  button.danger { background: #5a2a2a; }
+  button:hover { filter: brightness(1.15); }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .note { color: rgba(255,255,255,0.4); font-size: 11px; margin-top: 4px; line-height: 1.5; }
+  .card { background: #22222a; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .card .name { font-weight: 600; }
+  .status { font-size: 11px; }
+  .status.auto { color: #3FB950; }
+  .status.manual { color: #58a6ff; }
+  .status.missing { color: #8B949E; }
+  .keyrow { display: flex; gap: 6px; margin-top: 8px; }
+  .keyrow input { flex: 1; }
+  .verify-result { font-size: 11px; margin-top: 6px; white-space: pre-wrap; word-break: break-all; }
+  .verify-result.ok { color: #3FB950; }
+  .verify-result.err { color: #F85149; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mono { font-family: Consolas, monospace; }
+</style>
+</head>
+<body>
+<h1>DeskToken 设置</h1>
+<div class="note">所有设置即时生效并自动保存。API key 仅存 Windows 凭据管理器，不写文件、不上传。</div>
+
+<h2>外观</h2>
+<div class="field">
+  <label>不透明度（下限 60%）：<span id="opv"></span></label>
+  <input type="range" id="opacity" min="0.6" max="1" step="0.02" />
+</div>
+<div class="field">
+  <label>宽度</label>
+  <select id="width">
+    <option value="240">240px</option><option value="260">260px</option>
+    <option value="280">280px（默认）</option><option value="300">300px</option>
+    <option value="320">320px</option><option value="340">340px</option><option value="360">360px</option>
+  </select>
+</div>
+<div class="field">
+  <div class="row">
+    <input type="checkbox" id="ct" />
+    <label for="ct" style="margin:0">迷你模式（收缩为状态细条）</label>
+  </div>
+</div>
+
+<h2>平台凭据</h2>
+<div id="providers"></div>
+
+<h2>自定义监视（开放框架）</h2>
+<div class="note">任何"一个 GET 请求返回 JSON 额度"的平台都可以接入：填端点、认证头、JSON 路径映射（点语法，如 <span class="mono">data.limits.0.percentage</span>）。</div>
+<div id="customs"></div>
+<div class="card">
+  <div class="head"><span class="name">添加自定义监视</span></div>
+  <div class="grid2">
+    <div class="field"><label>名称</label><input type="text" id="cp-name" placeholder="例如 Qwen" /></div>
+    <div class="field"><label>轮询间隔（分钟）</label><input type="number" id="cp-poll" value="5" min="1" /></div>
+  </div>
+  <div class="field"><label>端点 URL</label><input type="text" id="cp-endpoint" class="mono" placeholder="https://api.example.com/v1/quota" /></div>
+  <div class="grid2">
+    <div class="field"><label>认证头名</label><input type="text" id="cp-header" class="mono" value="Authorization" /></div>
+    <div class="field"><label>认证前缀</label><input type="text" id="cp-prefix" class="mono" value="Bearer " /></div>
+  </div>
+  <div class="field"><label>API key（可留空，存凭据管理器）</label><input type="password" id="cp-key" class="mono" /></div>
+  <div class="field">
+    <label>窗口映射（每行一个：标签 | used 路径 | limit 路径 | reset 路径(可选)）</label>
+    <textarea id="cp-windows" rows="3" class="mono" placeholder="周 | data.usage.used | data.usage.limit | data.usage.resetTime"></textarea>
+  </div>
+  <div class="row">
+    <button id="cp-save">保存</button>
+    <button class="ghost" id="cp-verify">保存并验证</button>
+  </div>
+  <div class="verify-result" id="cp-result"></div>
+</div>
+
+<script>
+  const { invoke } = window.__TAURI__.core;
+  const $ = (id) => document.getElementById(id);
+
+  // ---- appearance ----
+  const op = $("opacity"), wsel = $("width"), ct = $("ct");
+  function showOp() { $("opv").textContent = Math.round(op.value * 100) + "%"; }
+  function applyAppearance() {
+    invoke("apply_appearance", { opacity: parseFloat(op.value), width: parseFloat(wsel.value), miniMode: ct.checked });
+  }
+  op.addEventListener("input", () => { showOp(); applyAppearance(); });
+  wsel.addEventListener("change", applyAppearance);
+  ct.addEventListener("change", applyAppearance);
+
+  // ---- builtin providers ----
+  async function loadProviders() {
+    const list = await invoke("detect_credentials");
+    const settings = await invoke("get_settings");
+    const wrap = $("providers");
+    wrap.innerHTML = "";
+    for (const p of list) {
+      const enabled = settings.enabled_providers.includes(p.id);
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <div class="head">
+          <input type="checkbox" ${enabled ? "checked" : ""} data-id="${p.id}" class="enable" />
+          <span class="name">${p.name}</span>
+          <span class="status ${p.status}">${p.status === "auto" ? "✓ 自动检测" : p.status === "manual" ? "✓ 手动 key" : "未配置"}</span>
+        </div>
+        <div class="note">${p.detail}</div>
+        ${p.supports_manual_key ? `
+        <div class="keyrow">
+          <input type="password" placeholder="粘贴 API key" data-key="${p.id}" class="mono" />
+          <button data-save="${p.id}">保存</button>
+          <button class="ghost" data-verify="${p.id}">验证</button>
+          <button class="danger" data-del="${p.id}">删除</button>
+        </div>
+        <div class="verify-result" id="vr-${p.id}"></div>` : ""}
+      `;
+      wrap.appendChild(card);
+    }
+    wrap.querySelectorAll(".enable").forEach(cb =>
+      cb.addEventListener("change", () => invoke("set_provider_enabled", { providerId: cb.dataset.id, enabled: cb.checked })));
+    wrap.querySelectorAll("[data-save]").forEach(b => b.addEventListener("click", async () => {
+      const id = b.dataset.save;
+      const key = wrap.querySelector(`[data-key="${id}"]`).value;
+      const r = $("vr-" + id);
+      try { await invoke("save_manual_key", { providerId: id, key }); r.className = "verify-result ok"; r.textContent = "已保存到凭据管理器"; loadProviders(); }
+      catch (e) { r.className = "verify-result err"; r.textContent = String(e); }
+    }));
+    wrap.querySelectorAll("[data-verify]").forEach(b => b.addEventListener("click", async () => {
+      const id = b.dataset.verify;
+      const r = $("vr-" + id);
+      r.className = "verify-result"; r.textContent = "验证中…";
+      try { r.className = "verify-result ok"; r.textContent = await invoke("verify_provider", { providerId: id, customId: null }); }
+      catch (e) { r.className = "verify-result err"; r.textContent = String(e); }
+    }));
+    wrap.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
+      await invoke("delete_manual_key", { providerId: b.dataset.del });
+      loadProviders();
+    }));
+  }
+
+  // ---- custom providers ----
+  function parseWindows(text) {
+    return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+      const [label, used, limit, reset] = l.split("|").map(s => (s || "").trim());
+      return { label, used_path: used, limit_path: limit, reset_path: reset || null };
+    }).filter(w => w.label && w.used_path && w.limit_path);
+  }
+  function newId() { return "cp-" + Date.now().toString(36); }
+  async function saveCustom(verify) {
+    const def = {
+      id: newId(),
+      name: $("cp-name").value.trim(),
+      endpoint: $("cp-endpoint").value.trim(),
+      auth_header: $("cp-header").value.trim() || "Authorization",
+      auth_prefix: $("cp-prefix").value,
+      poll_minutes: parseInt($("cp-poll").value) || 5,
+      windows: parseWindows($("cp-windows").value),
+    };
+    const r = $("cp-result");
+    try {
+      await invoke("save_custom_provider", { def, key: $("cp-key").value || null });
+      r.className = "verify-result ok"; r.textContent = "已保存";
+      if (verify) {
+        r.textContent = "验证中…";
+        try { r.className = "verify-result ok"; r.textContent = await invoke("verify_provider", { providerId: "", customId: def.id }); }
+        catch (e) { r.className = "verify-result err"; r.textContent = String(e); }
+      }
+      loadCustoms();
+    } catch (e) { r.className = "verify-result err"; r.textContent = String(e); }
+  }
+  $("cp-save").addEventListener("click", () => saveCustom(false));
+  $("cp-verify").addEventListener("click", () => saveCustom(true));
+  async function loadCustoms() {
+    const list = await invoke("list_custom_providers");
+    const wrap = $("customs");
+    wrap.innerHTML = "";
+    for (const c of list) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <div class="head"><span class="name">${c.name}</span><span class="status manual">${c.poll_minutes}min</span></div>
+        <div class="note mono">${c.endpoint}</div>
+        <div class="note">${c.windows.length} 个窗口映射</div>
+        <div class="keyrow"><button class="ghost" data-cverify="${c.id}">验证</button><button class="danger" data-cdel="${c.id}">删除</button></div>
+        <div class="verify-result" id="cvr-${c.id}"></div>`;
+      wrap.appendChild(card);
+    }
+    wrap.querySelectorAll("[data-cdel]").forEach(b => b.addEventListener("click", async () => {
+      await invoke("delete_custom_provider", { id: b.dataset.cdel }); loadCustoms();
+    }));
+    wrap.querySelectorAll("[data-cverify]").forEach(b => b.addEventListener("click", async () => {
+      const r = $("cvr-" + b.dataset.cverify);
+      r.className = "verify-result"; r.textContent = "验证中…";
+      try { r.className = "verify-result ok"; r.textContent = await invoke("verify_provider", { providerId: "", customId: b.dataset.cverify }); }
+      catch (e) { r.className = "verify-result err"; r.textContent = String(e); }
+    }));
+  }
+
+  // ---- init ----
+  invoke("get_settings").then((s) => {
+    op.value = s.opacity; wsel.value = String(s.width); ct.checked = s.mini_mode; showOp();
+  });
+  loadProviders();
+  loadCustoms();
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Rust / Tauri
+src-tauri/target/
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Tauri bundler output
+src-tauri/gen/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# Local env / secrets (never commit credentials)
+.env
+*.local
