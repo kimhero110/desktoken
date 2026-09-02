@@ -14,8 +14,13 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
-    "icon": []
+    "active": true,
+    "targets": [
+      "nsis",
+      "exe"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ]
   }
 }

@@ -30,23 +30,35 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Build and Release with Tauri Action
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2.0.0" --locked
+
+      - name: Build Standalone Executable & Bundle
+        run: |
+          cd src-tauri
+          cargo tauri build
+
+      - name: Upload Artifact to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'QuotaBar ${{ github.ref_name }}'
-          releaseBody: |
+          name: 'QuotaBar ${{ github.ref_name }}'
+          body: |
             ## 📊 QuotaBar Release ${{ github.ref_name }}
             
-            ### What's New
-            - Real-time AI coding quota & rate limit floating status bar
-            - Support for Claude 5h window, Kimi, Codex, GLM, and Custom Provider Engine
-            - Acrylic translucent non-activating window on Windows 10/11
+            ### 🌟 What's New
+            - Non-intrusive acrylic desktop floating status bar for Windows 10/11
+            - Real-time tracking for Claude 5-hour rolling window, Kimi, Codex, and GLM
+            - Universal Custom Provider JSON engine
+            - Zero telemetry, 100% local credentials storage
             
-            ### Download
-            Download the installer or portable standalone executable below.
-          releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}
+            ### 💾 Installation
+            - **`QuotaBar_x64-setup.exe`**: Standard Windows installer (NSIS)
+            - **`quotabar.exe`**: Portable standalone executable (no installation required)
+          files: |
+            src-tauri/target/release/desktoken.exe
+            src-tauri/target/release/QuotaBar.exe
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
