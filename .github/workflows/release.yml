@@ -46,9 +46,15 @@ jobs:
         shell: bash
         run: |
           cd src-tauri/target/release
-          FILES=$(ls quotabar* 2>/dev/null; ls bundle/nsis/*.exe bundle/dmg/*.dmg 2>/dev/null)
-          for f in $FILES; do shasum -a 256 "$f"; done > checksums-${{ matrix.platform }}.txt || \
-          for f in $FILES; do sha256sum "$f"; done > checksums-${{ matrix.platform }}.txt
+          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
+            FILES="quotabar.exe $(ls bundle/nsis/*.exe 2>/dev/null)"
+            HASHER="sha256sum"
+          else
+            FILES="quotabar $(ls bundle/dmg/*.dmg 2>/dev/null)"
+            HASHER="shasum -a 256"
+          fi
+          : > checksums-${{ matrix.platform }}.txt
+          for f in $FILES; do $HASHER "$f" >> checksums-${{ matrix.platform }}.txt; done
           cat checksums-${{ matrix.platform }}.txt
 
       - name: Build provenance attestation

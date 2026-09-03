@@ -711,19 +711,24 @@ fn main() {
         .setup(|app| {
             let s = settings::load();
 
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let mut wb = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("QuotaBar")
                 .inner_size(s.width, WIN_H)
                 .resizable(false)
                 .maximizable(false)
                 .minimizable(false)
                 .decorations(false)
-                .transparent(true)
                 .always_on_top(true)
                 .skip_taskbar(true)
                 .focused(false)
-                .visible(false)
-                .build()?;
+                .visible(false);
+            // transparent() is Windows/Linux-only in Tauri 2; on macOS
+            // window-vibrancy sets up transparency itself.
+            #[cfg(not(target_os = "macos"))]
+            {
+                wb = wb.transparent(true);
+            }
+            let window = wb.build()?;
 
             clamp_position(&window, &s)?;
             // Spike A: acrylic (undocumented SetWindowCompositionAttribute under the hood).
