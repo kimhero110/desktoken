@@ -53,15 +53,17 @@ try {
     if ($LASTEXITCODE -ne 0) { Fail "测试未通过，不发版" }
 } finally { Pop-Location }
 
-# ---------- 5. 提交 + tag + 推送 ----------
+# ---------- 5. 提交 + tag + 推送（GitHub + Gitee 双远端） ----------
 git -C $RepoRoot add src-tauri\Cargo.toml src-tauri\Cargo.lock src-tauri\tauri.conf.json
 git -C $RepoRoot commit -m "chore: release v$new" | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "commit 失败" }
 git -C $RepoRoot tag "v$new"
-git -C $RepoRoot push
-if ($LASTEXITCODE -ne 0) { Fail "push main 失败（tag 未推，可重跑脚本）" }
-git -C $RepoRoot push origin "v$new"
-if ($LASTEXITCODE -ne 0) { Fail "push tag 失败：git push origin v$new 手动补" }
+foreach ($remote in @('origin', 'gitee')) {
+    git -C $RepoRoot push $remote main
+    if ($LASTEXITCODE -ne 0) { Fail "push $remote main 失败（tag 未推，可重跑脚本）" }
+    git -C $RepoRoot push $remote "v$new"
+    if ($LASTEXITCODE -ne 0) { Fail "push $remote tag 失败：git push $remote v$new 手动补" }
+}
 
 Write-Host "✓ v$new 已推送，CI 构建中（约 18 分钟）" -ForegroundColor Green
 
