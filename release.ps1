@@ -1,4 +1,4 @@
-# QuotaBar 发版一条龙: bump → test → commit → tag → push → 盯 CI
+﻿# QuotaBar 发版一条龙: bump → test → commit → tag → push → 盯 CI
 # 用法: 在仓库根目录  powershell -ExecutionPolicy Bypass -File release.ps1 patch
 #       (patch / minor / major)
 # 设计原则: 版本号字段、tag、发布三处只在此脚本里同步, 任何人不手工改其中一处。
