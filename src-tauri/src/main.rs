@@ -46,21 +46,6 @@ fn apply_noactivate(window: &WebviewWindow) {
         GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
-    let log = |msg: String| {
-        let dir = std::path::PathBuf::from(
-            std::env::var("APPDATA").unwrap_or_else(|_| ".".into()),
-        )
-        .join("quotabar");
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("spike.log"))
-            .map(|mut f| {
-                use std::io::Write;
-                let _ = writeln!(f, "{}", msg);
-            });
-    };
     match window.hwnd() {
         Ok(hwnd) => {
             let raw: HWND = hwnd.0 as HWND;
@@ -78,13 +63,13 @@ fn apply_noactivate(window: &WebviewWindow) {
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
                 );
                 let confirm = GetWindowLongPtrW(raw, GWL_EXSTYLE);
-                log(format!(
+                rustlog(format!(
                     "noactivate: hwnd={:?} before=0x{:X} set=0x{:X} confirm=0x{:X}",
                     raw, before, after, confirm
                 ));
             }
         }
-        Err(e) => log(format!("noactivate: hwnd() failed: {:?}", e)),
+        Err(e) => rustlog(format!("noactivate: hwnd() failed: {:?}", e)),
     }
 }
 
@@ -515,11 +500,8 @@ fn jslog(msg: String) {
 
 pub(crate) fn rustlog(msg: String) {
     // redact defensively (eng review: no tokens in logs)
-    let safe = msg
-        .replace(&credentials::keyring_get("glm").unwrap_or_default(), "***")
-        .replace(&credentials::keyring_get("kimi").unwrap_or_default(), "***");
-    let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()))
-        .join("quotabar");
+    let safe = diagnostics::redact(&msg);
+    let dir = settings::app_data_dir();
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::OpenOptions::new()
         .create(true)
@@ -746,10 +728,22 @@ fn main() {
             clamp_position(&window, &s)?;
             // Spike A: acrylic (undocumented SetWindowCompositionAttribute under the hood).
             // Fallback per design tokens: if acrylic fails, raise opacity to 0.88.
+            #[cfg(target_os = "windows")]
             if window_vibrancy::apply_acrylic(&window, Some((18, 18, 22, 184))).is_err() {
                 let mut s2 = s.clone();
                 s2.opacity = 0.88;
                 let _ = settings::save(&s2);
+            }
+            #[cfg(target_os = "macos")]
+            if window_vibrancy::apply_vibrancy(
+                &window,
+                window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground,
+                None,
+                None,
+            )
+            .is_err()
+            {
+                rustlog("macOS vibrancy failed; continuing without".into());
             }
             if s.mini_mode {
                 // frontend owns height: emit after page load is racy, so just

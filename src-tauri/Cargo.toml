@@ -13,7 +13,6 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
-winreg = "0.52"
 window-vibrancy = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -25,6 +24,9 @@ regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
 keyring = { version = "3", features = ["windows-native"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
@@ -37,6 +39,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Input",
     "Win32_UI_Input_KeyboardAndMouse",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
 
 [profile.release]
 panic = "abort"

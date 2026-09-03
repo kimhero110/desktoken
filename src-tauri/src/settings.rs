@@ -76,14 +76,37 @@ impl Default for Settings {
     }
 }
 
-pub fn settings_path() -> PathBuf {
+/// Cross-platform app data dir: %APPDATA%\quotabar on Windows,
+/// ~/Library/Application Support/quotabar on macOS, ~/.config/quotabar on Linux.
+pub fn app_data_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("quotabar").join("settings.json")
+    #[cfg(target_os = "macos")]
+    let base = format!(
+        "{}/Library/Application Support",
+        std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+    );
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let base = std::env::var("XDG_CONFIG_HOME")
+        .unwrap_or_else(|_| format!("{}/.config", std::env::var("HOME").unwrap_or_else(|_| ".".into())));
+    PathBuf::from(base).join("quotabar")
+}
+
+pub fn settings_path() -> PathBuf {
+    app_data_dir().join("settings.json")
 }
 
 fn legacy_settings_path() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("desktoken").join("settings.json")
+    // DeskToken-era dir (Windows); non-Windows never had one
+    #[cfg(target_os = "windows")]
+    {
+        let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(base).join("desktoken").join("settings.json")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        app_data_dir().join("settings.json") // == new path: legacy check is a no-op
+    }
 }
 
 /// Load settings; corrupt file → backup + defaults (per Error Registry).

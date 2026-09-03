@@ -18,6 +18,8 @@ jobs:
         include:
           - platform: 'windows-latest'
             args: ''
+          - platform: 'macos-latest'
+            args: '--bundles dmg'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -35,24 +37,27 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2.0.0" --locked
 
-      - name: Build Standalone Executable & Bundle
+      - name: Build & Bundle
         run: |
           cd src-tauri
-          cargo tauri build
+          cargo tauri build ${{ matrix.args }}
 
       - name: Generate checksums
         shell: bash
         run: |
           cd src-tauri/target/release
-          sha256sum quotabar.exe bundle/nsis/*.exe > checksums.txt
-          cat checksums.txt
+          FILES=$(ls quotabar* 2>/dev/null; ls bundle/nsis/*.exe bundle/dmg/*.dmg 2>/dev/null)
+          for f in $FILES; do shasum -a 256 "$f"; done > checksums-${{ matrix.platform }}.txt || \
+          for f in $FILES; do sha256sum "$f"; done > checksums-${{ matrix.platform }}.txt
+          cat checksums-${{ matrix.platform }}.txt
 
       - name: Build provenance attestation
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            src-tauri/target/release/quotabar.exe
+            src-tauri/target/release/quotabar*
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/dmg/*.dmg
 
       - name: Upload Artifact to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -63,20 +68,21 @@ jobs:
             ## QuotaBar Release ${{ github.ref_name }}
 
             ### What's New
-            - Non-intrusive acrylic desktop floating status bar for Windows 10/11
+            - Non-intrusive floating quota bar for Windows 10/11 & macOS
             - Real-time tracking for Kimi, GLM, Codex, Claude, Gemini/Antigravity
             - Universal Custom Provider JSON engine
             - Zero telemetry, 100% local credentials storage
 
             ### Installation
-            - **`QuotaBar_x64-setup.exe`**: Standard Windows installer (NSIS, includes WebView2 bootstrapper)
-            - **`quotabar.exe`**: Portable standalone executable
+            - **Windows**: `QuotaBar_x64-setup.exe` (installer) or `quotabar.exe` (portable)
+            - **macOS**: `QuotaBar_x64.dmg` (drag to Applications)
 
             ### Verify
-            `checksums.txt` contains SHA-256 hashes; build provenance attestation is on the *Attestations* tab.
+            `checksums-*.txt` contain SHA-256 hashes; build provenance attestation is on the *Attestations* tab.
           files: |
             src-tauri/target/release/quotabar.exe
             src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/checksums.txt
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/checksums-*.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

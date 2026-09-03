@@ -8,8 +8,7 @@ use std::sync::Mutex;
 static DB: std::sync::OnceLock<Mutex<Connection>> = std::sync::OnceLock::new();
 
 fn db_path() -> std::path::PathBuf {
-    let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()))
-        .join("quotabar");
+    let dir = crate::settings::app_data_dir();
     let _ = std::fs::create_dir_all(&dir);
     dir.join("history.db")
 }

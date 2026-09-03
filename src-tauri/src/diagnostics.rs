@@ -75,9 +75,7 @@ pub fn collect(provider_states: &[(String, String, Option<String>)]) -> String {
         out.push_str(&format!("{} ({}): {}\n", name, id, err.as_deref().unwrap_or("ok")));
     }
     out.push_str("--- log tail (redacted) ---\n");
-    let log = std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()))
-        .join("quotabar")
-        .join("spike.log");
+    let log = crate::settings::app_data_dir().join("spike.log");
     if let Ok(raw) = std::fs::read_to_string(&log) {
         let tail: String = raw
             .lines()

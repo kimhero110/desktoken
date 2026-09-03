@@ -95,6 +95,45 @@ $csrf = ([regex]::Match($p.CommandLine, '--csrf_token ([0-9a-fA-F-]+)')).Groups[
 
 #[cfg(not(target_os = "windows"))]
 fn discover_ls() -> Option<LsEndpoint> {
+    // macOS/Linux: find the LS via ps, ports via lsof
+    let out = std::process::Command::new("ps")
+        .args(["-eo", "pid=,command="])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        if !line.contains("language_server") || !line.contains("--override_ide_name antigravity") {
+            continue;
+        }
+        let pid: u32 = line.trim().split_whitespace().next()?.parse().ok()?;
+        let csrf = line
+            .split("--csrf_token ")
+            .nth(1)?
+            .split_whitespace()
+            .next()?
+            .to_string();
+        let lsof = std::process::Command::new("lsof")
+            .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        let ltext = String::from_utf8_lossy(&lsof.stdout);
+        let mut ports = vec![];
+        for l in ltext.lines() {
+            if let Some(idx) = l.find("127.0.0.1:") {
+                let digits: String = l[idx + 10..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                if let Ok(p) = digits.parse::<u16>() {
+                    ports.push(p);
+                }
+            }
+        }
+        if ports.is_empty() || csrf.is_empty() {
+            continue;
+        }
+        return Some(LsEndpoint { ports, csrf });
+    }
     None
 }
 
@@ -302,15 +341,22 @@ fn map_status(status: u16) -> ProviderError {
 }
 
 pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
-    // Antigravity channel first (this machine's reality); gemini-cli file as
-    // the classic alternative.
-    if cli_cred_path().is_none() && antigravity_installed() {
-        let windows = fetch_via_ls().await?;
-        return Ok(QuotaSnapshot::ok(ID, NAME, Some("Antigravity".into()), windows, "official"));
+    // gemini-cli credential file → classic Code Assist flow. Otherwise the
+    // Antigravity LS channel (works whenever the IDE is running; no keyring
+    // read needed — the LS holds the auth).
+    if cli_cred_path().is_none() {
+        return match fetch_via_ls().await {
+            Ok(windows) => Ok(QuotaSnapshot::ok(ID, NAME, Some("Antigravity".into()), windows, "official")),
+            Err(e) => {
+                if antigravity_installed() {
+                    Err(ProviderError::IdeNotRunning)
+                } else {
+                    Err(e)
+                }
+            }
+        };
     }
-    let Some(path) = cli_cred_path() else {
-        return Err(ProviderError::CredentialMissing);
-    };
+    let path = cli_cred_path().unwrap();
     let (token, _source) = oauth::resolve_oauth_token(&path, &CLI_SPEC, refresh_call).await?;
 
     let load_body = serde_json::json!({
