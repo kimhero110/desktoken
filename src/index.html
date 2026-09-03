@@ -408,6 +408,14 @@
     }
     render();
   });
+  // hot reload: an instance was disabled in settings — drop its row now
+  listen("provider-removed", (ev) => {
+    const id = ev.payload;
+    snapshots.delete(id);
+    pendingInit.delete(id);
+    historyCache.clear(); // cheap: stale series for a gone id are harmless
+    render();
+  });
   listen("mini-mode", (ev) => {
     document.body.classList.toggle("mini", ev.payload);
     refit();

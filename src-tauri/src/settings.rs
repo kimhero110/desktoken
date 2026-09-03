@@ -37,7 +37,12 @@ pub struct Settings {
     pub mini_mode: bool,
     pub tos_accepted: bool,
     pub enabled_providers: Vec<String>,
-    /// Multi-instance (B 方案): instance ids turned OFF individually
+    /// true once the user has explicitly toggled any provider: from then on an
+    /// EMPTY enabled_providers means "nothing on" instead of the first-run
+    /// default "everything on" (the empty-list trap).
+    #[serde(default)]
+    pub providers_configured: bool,
+    /// Multi-instance (方案 B): instance ids turned OFF individually
     /// (e.g. "codex#opencode"). enabled_providers stays base-level.
     #[serde(default)]
     pub disabled_instances: Vec<String>,
@@ -69,6 +74,7 @@ impl Default for Settings {
             mini_mode: false,
             tos_accepted: false,
             enabled_providers: vec![],
+            providers_configured: false,
             disabled_instances: vec![],
             poll_intervals: Default::default(),
             skipped_version: None,

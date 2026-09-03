@@ -132,7 +132,8 @@ fn spawn_provider<F, Fut>(
     name: String,
     period_secs: u64,
     fetch: F,
-) where
+) -> tauri::async_runtime::JoinHandle<()>
+where
     F: Fn() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<QuotaSnapshot, providers::ProviderError>> + Send,
 {
@@ -173,58 +174,125 @@ fn spawn_provider<F, Fut>(
                 _ = notify_refreshes().notified() => {}
             }
         }
-    });
+    })
 }
 
-/// Start polling for all configured provider instances. Called once at startup.
-/// ToS gate: caller must ensure consent before any network request.
-/// 方案 B: every discovered credential = one row (CLI + opencode + manual).
-pub fn start(app: AppHandle) {
+/// Running poll tasks per instance id — abortable so settings changes take
+/// effect immediately (hot reload) instead of requiring an app restart.
+static TASKS: OnceLock<
+    Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
+> = OnceLock::new();
+
+fn tasks() -> &'static Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>> {
+    TASKS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Desired instance set: discovered builtin instances + custom providers,
+/// filtered by base-level and instance-level settings.
+fn desired() -> Vec<crate::credentials::InstanceDesc> {
     let s = settings::load();
-
     let enabled_base = |base: &str| {
-        s.enabled_providers.is_empty() || s.enabled_providers.iter().any(|p| p == base)
+        if s.providers_configured {
+            s.enabled_providers.iter().any(|p| p == base)
+        } else {
+            s.enabled_providers.is_empty() || s.enabled_providers.iter().any(|p| p == base)
+        }
     };
+    let mut out: Vec<crate::credentials::InstanceDesc> =
+        crate::credentials::discover_instances()
+            .into_iter()
+            .filter(|i| enabled_base(&i.base) && !s.disabled_instances.contains(&i.id))
+            .collect();
+    for def in &s.custom_providers {
+        out.push(crate::credentials::InstanceDesc {
+            id: def.id.clone(),
+            name: def.name.clone(),
+            base: "custom".into(),
+        });
+    }
+    out
+}
 
-    // base-level polling floors (PLAN.md decisions)
+/// (Re)compute the polling set: abort tasks whose instance is gone, spawn new
+/// ones, tell the frontend what's live now. Called at startup (ToS-gated) and
+/// on every provider/instance/custom settings change.
+pub fn sync(app: AppHandle) {
+    let want = desired();
+
+    // abort removed
+    {
+        let mut m = match tasks().lock() {
+            Ok(m) => m,
+            Err(e) => e.into_inner(),
+        };
+        let want_ids: Vec<&String> = want.iter().map(|i| &i.id).collect();
+        let removed: Vec<String> = m
+            .keys()
+            .filter(|k| !want_ids.contains(k))
+            .cloned()
+            .collect();
+        for id in &removed {
+            if let Some(h) = m.remove(id) {
+                h.abort();
+            }
+            // clear row state so the bar drops it immediately
+            if let Ok(mut lm) = last().lock() {
+                lm.remove(id);
+            }
+            use tauri::Emitter;
+            let _ = app.emit("provider-removed", id.clone());
+            crate::rustlog(format!("poller: removed {}", id));
+        }
+    }
+
+    // spawn new
     let period_for = |base: &str| match base {
         "claude" => 600, // ≥10min, ToS clamp
         "gemini" => 300, // ≥5min
         _ => 120,
     };
-
-    let instances: Vec<crate::credentials::InstanceDesc> =
-        crate::credentials::discover_instances()
-            .into_iter()
-            .filter(|i| enabled_base(&i.base) && !s.disabled_instances.contains(&i.id))
-            .collect();
-
-    // tell the frontend which providers are coming (loading placeholders)
-    let init: Vec<serde_json::Value> = instances
+    // tell the frontend the live set (loading placeholders for new rows)
+    let live: Vec<serde_json::Value> = want
         .iter()
         .map(|i| serde_json::json!({ "id": i.id, "name": i.name }))
         .collect();
-    let _ = app.emit("providers-init", init);
 
-    for inst in instances {
+    let mut spawned: Vec<String> = vec![];
+    for inst in want {
+        let mut m = match tasks().lock() {
+            Ok(m) => m,
+            Err(e) => e.into_inner(),
+        };
+        if m.contains_key(&inst.id) {
+            continue;
+        }
         let period = period_for(&inst.base);
-        spawn_provider(app.clone(), inst.id.clone(), inst.name.clone(), period, move || {
-            let id = inst.id.clone();
-            let name = inst.name.clone();
-            async move { providers::fetch_instance(&id, &name).await }
-        });
-    }
-    for def in s.custom_providers {
-        let period = def.poll_minutes.max(1) * 60;
-        spawn_provider(
+        let id2 = inst.id.clone();
+        let name2 = inst.name.clone();
+        let handle = spawn_provider(
             app.clone(),
-            def.id.clone(),
-            def.name.clone(),
+            inst.id.clone(),
+            inst.name.clone(),
             period,
             move || {
-                let d = def.clone();
-                async move { providers::custom::fetch_snapshot(&d).await }
+                let id = id2.clone();
+                let name = name2.clone();
+                async move { providers::fetch_instance(&id, &name).await }
             },
         );
+        m.insert(inst.id.clone(), handle);
+        spawned.push(inst.id.clone());
     }
+
+    if !spawned.is_empty() {
+        crate::rustlog(format!("poller: spawned {:?}", spawned));
+    }
+
+    let _ = app.emit("providers-init", live);
+}
+
+/// Start polling (ToS gate: caller ensures consent). Kept as the historical
+/// entry point; now equivalent to sync().
+pub fn start(app: AppHandle) {
+    sync(app);
 }

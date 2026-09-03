@@ -586,14 +586,16 @@ fn list_instances() -> Vec<credentials::InstanceDesc> {
 
 /// Per-instance toggle: off-list in settings.disabled_instances.
 #[tauri::command]
-fn set_instance_enabled(id: String, enabled: bool) -> Result<(), String> {
+fn set_instance_enabled(app: tauri::AppHandle, id: String, enabled: bool) -> Result<(), String> {
     let mut s = settings::load();
     if enabled {
         s.disabled_instances.retain(|x| x != &id);
     } else if !s.disabled_instances.contains(&id) {
         s.disabled_instances.push(id);
     }
-    settings::save(&s).map_err(|e| e.to_string())
+    settings::save(&s).map_err(|e| e.to_string())?;
+    poller::sync(app); // hot reload: row appears/disappears immediately
+    Ok(())
 }
 
 #[tauri::command]
@@ -611,14 +613,18 @@ fn delete_manual_key(provider_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_provider_enabled(provider_id: String, enabled: bool) -> Result<(), String> {
+fn set_provider_enabled(app: tauri::AppHandle, provider_id: String, enabled: bool) -> Result<(), String> {
     let mut s = settings::load();
     if enabled && !s.enabled_providers.contains(&provider_id) {
         s.enabled_providers.push(provider_id);
     } else if !enabled {
         s.enabled_providers.retain(|p| p != &provider_id);
     }
-    settings::save(&s).map_err(|e| e.to_string())
+    // explicit user action: from now on an empty list means "nothing on"
+    s.providers_configured = true;
+    settings::save(&s).map_err(|e| e.to_string())?;
+    poller::sync(app); // hot reload
+    Ok(())
 }
 
 #[tauri::command]
@@ -627,7 +633,7 @@ fn list_custom_providers() -> Vec<settings::CustomProvider> {
 }
 
 #[tauri::command]
-fn save_custom_provider(def: settings::CustomProvider, key: Option<String>) -> Result<(), String> {
+fn save_custom_provider(app: tauri::AppHandle, def: settings::CustomProvider, key: Option<String>) -> Result<(), String> {
     if def.name.trim().is_empty() || def.endpoint.trim().is_empty() {
         return Err("名称与端点 URL 不能为空".into());
     }
@@ -640,15 +646,18 @@ fn save_custom_provider(def: settings::CustomProvider, key: Option<String>) -> R
     let mut s = settings::load();
     s.custom_providers.retain(|p| p.id != def.id);
     s.custom_providers.push(def);
-    settings::save(&s).map_err(|e| e.to_string())
+    settings::save(&s).map_err(|e| e.to_string())?;
+    poller::sync(app); // hot reload
+    Ok(())
 }
 
 #[tauri::command]
-fn delete_custom_provider(id: String) -> Result<(), String> {
+fn delete_custom_provider(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let mut s = settings::load();
     s.custom_providers.retain(|p| p.id != id);
     settings::save(&s).map_err(|e| e.to_string())?;
     let _ = credentials::keyring_delete(&format!("custom/{}", id));
+    poller::sync(app); // hot reload
     Ok(())
 }
 
