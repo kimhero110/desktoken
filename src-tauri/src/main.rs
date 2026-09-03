@@ -31,7 +31,6 @@ use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
-const WIN_W: f64 = 280.0;
 const WIN_H: f64 = 320.0;
 
 // ---------------------------------------------------------------------------

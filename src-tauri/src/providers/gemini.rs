@@ -1,22 +1,21 @@
-// Gemini — two credential paths, two quota channels:
+// Gemini — two channels:
 //
 // A) gemini-cli (~/.gemini/oauth_creds.json): classic Code Assist flow —
 //    POST cloudcode-pa.googleapis.com/v1internal:loadCodeAssist → project,
 //    then :retrieveUserQuota → per-model daily buckets.
-// B) Antigravity IDE (Windows Credential Manager target "gemini:antigravity"):
-//    the Code Assist quota API refuses consumer accounts (free-tier
-//    UNSUPPORTED_CLIENT, retrieveUserQuota 403 SUBSCRIPTION_REQUIRED), but
-//    Antigravity's own channel works: POST
-//    daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels with
-//    header "User-Agent: antigravity/*" (the endpoint gates on it) — each
-//    model entry carries quotaInfo{remainingFraction, resetTime}. All
-//    gemini-* models share one daily bucket; we report the worst.
+// B) Antigravity IDE: the Code Assist quota API refuses consumer accounts
+//    (free-tier UNSUPPORTED_CLIENT, retrieveUserQuota 403), and the quotaInfo
+//    on fetchAvailableModels is a DIFFERENT number from the IDE's own panel.
+//    The panel's real source is the language server's local ConnectRPC:
+//      POST https://127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary
+//      header x-codeium-csrf-token (from the LS process command line)
+//    Returns groups → buckets {window: "weekly"|"5h", remainingFraction,
+//    resetTime} — exactly what the IDE panel shows.
+//    Discovery: the LS listens on random loopback ports; we resolve port +
+//    CSRF token from the running process (PowerShell CIM + TCP table), once
+//    per poll (5 min cadence — cheap and self-healing across IDE restarts).
+//    IDE not running → IdeNotRunning row (honest, instead of a wrong number).
 //
-// OAuth refresh: gemini-cli public client creds, shared 6-step protocol.
-// Antigravity credentials are READ-ONLY (PLAN.md 凭据只读优先): when its
-// access token is near expiry we let the IDE refresh it (it does, hourly) —
-// we never write the foreign entry; a failed self-refresh maps to AuthExpired
-// and the next poll picks up the IDE's fresh token.
 // Poll interval clamped to >= 5 min (PLAN.md decision #12).
 use super::{ProviderError, QuotaSnapshot, QuotaWindow};
 use crate::fetch;
@@ -26,8 +25,6 @@ use serde_json::Value;
 pub const ID: &str = "gemini";
 pub const NAME: &str = "Gemini";
 const BASE_CLASSIC: &str = "https://cloudcode-pa.googleapis.com/v1internal";
-const BASE_DAILY: &str = "https://daily-cloudcode-pa.googleapis.com/v1internal";
-const ANTIGRAVITY_UA: &str = "antigravity/1.0";
 
 const CLI_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
     access_path: "access_token",
@@ -36,41 +33,158 @@ const CLI_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
     expiry_unit: oauth::ExpiryUnit::Millis,
 };
 
-const ANTIGRAVITY_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
-    access_path: "token.access_token",
-    refresh_path: "token.refresh_token",
-    expires_path: Some("token.expiry"), // RFC3339 string
-    expiry_unit: oauth::ExpiryUnit::Seconds,
-};
-
 const ANTIGRAVITY_TARGET: &str = "gemini:antigravity";
+const LS_RPC: &str = "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary";
 
-enum CredSource {
-    CliFile,
-    Antigravity,
-}
-
-/// gemini-cli credential file (preferred); Antigravity keyring as fallback.
-async fn resolve_token() -> Result<(String, CredSource), ProviderError> {
-    let home = crate::credentials::home().ok_or(ProviderError::CredentialMissing)?;
-    let p = home.join(".gemini/oauth_creds.json");
+/// gemini-cli credential file path, if present.
+fn cli_cred_path() -> Option<std::path::PathBuf> {
+    let p = crate::credentials::home()?.join(".gemini/oauth_creds.json");
     if p.exists() {
-        let (t, _) = oauth::resolve_oauth_token(&p, &CLI_SPEC, refresh_call).await?;
-        return Ok((t, CredSource::CliFile));
+        Some(p)
+    } else {
+        None
     }
-    if crate::credentials::read_foreign_cred(ANTIGRAVITY_TARGET).is_some() {
-        let (t, _) =
-            oauth::resolve_oauth_keyring(ANTIGRAVITY_TARGET, &ANTIGRAVITY_SPEC, refresh_call)
-                .await?;
-        return Ok((t, CredSource::Antigravity));
-    }
-    Err(ProviderError::CredentialMissing)
 }
+
+fn antigravity_installed() -> bool {
+    crate::credentials::read_foreign_cred(ANTIGRAVITY_TARGET).is_some()
+}
+
+// ---------------------------------------------------------------------------
+// B) Antigravity local language-server channel
+// ---------------------------------------------------------------------------
+
+struct LsEndpoint {
+    ports: Vec<u16>,
+    csrf: String,
+}
+
+/// Discover the running Antigravity language server: CSRF token from its
+/// command line, loopback listen ports from the TCP table.
+#[cfg(target_os = "windows")]
+fn discover_ls() -> Option<LsEndpoint> {
+    const SCRIPT: &str = r#"
+$p = Get-CimInstance Win32_Process -Filter "Name='language_server.exe'" |
+     Where-Object { $_.CommandLine -match '--override_ide_name antigravity' } |
+     Select-Object -First 1
+if (-not $p) { exit 1 }
+$ports = (Get-NetTCPConnection -OwningProcess $p.ProcessId -State Listen -ErrorAction SilentlyContinue |
+          Where-Object { $_.LocalAddress -eq '127.0.0.1' } |
+          Select-Object -ExpandProperty LocalPort) -join ','
+$csrf = ([regex]::Match($p.CommandLine, '--csrf_token ([0-9a-fA-F-]+)')).Groups[1].Value
+"$ports|$csrf"
+"#;
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let (ports, csrf) = text.split_once('|')?;
+    let ports: Vec<u16> = ports.split(',').filter_map(|p| p.parse().ok()).collect();
+    if ports.is_empty() || csrf.is_empty() {
+        return None;
+    }
+    Some(LsEndpoint {
+        ports,
+        csrf: csrf.to_string(),
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn discover_ls() -> Option<LsEndpoint> {
+    None
+}
+
+/// The LS serves HTTPS with a self-signed cert on loopback — a dedicated
+/// client scoped to this one purpose (never used for internet traffic).
+fn ls_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+async fn fetch_via_ls() -> Result<Vec<QuotaWindow>, ProviderError> {
+    let ep = tokio::task::spawn_blocking(discover_ls)
+        .await
+        .map_err(|_| ProviderError::IdeNotRunning)?
+        .ok_or(ProviderError::IdeNotRunning)?;
+    let client = ls_client();
+    for port in &ep.ports {
+        let url = format!("https://127.0.0.1:{}{}", port, LS_RPC);
+        let resp = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("x-codeium-csrf-token", &ep.csrf)
+            .body("{}")
+            .send()
+            .await;
+        let Ok(resp) = resp else { continue };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let body = resp.text().await.map_err(|_| ProviderError::Network)?;
+        return parse_ls_quota(&body);
+    }
+    Err(ProviderError::IdeNotRunning)
+}
+
+/// RetrieveUserQuotaSummary response → Gemini group windows (5h + weekly).
+pub fn parse_ls_quota(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
+    let v: Value = serde_json::from_str(body).map_err(|_| ProviderError::ParseFailed)?;
+    let groups = fetch::json_path(&v, "response.groups")
+        .and_then(|g| g.as_array())
+        .ok_or(ProviderError::ParseFailed)?;
+    let gemini = groups
+        .iter()
+        .find(|g| {
+            g.get("displayName")
+                .and_then(|d| d.as_str())
+                .map(|d| d.contains("Gemini"))
+                .unwrap_or(false)
+        })
+        .ok_or(ProviderError::ParseFailed)?;
+    let buckets = gemini
+        .get("buckets")
+        .and_then(|b| b.as_array())
+        .ok_or(ProviderError::ParseFailed)?;
+    let mut windows: Vec<QuotaWindow> = vec![];
+    for b in buckets {
+        let label = match b.get("window").and_then(|w| w.as_str()) {
+            Some("5h") => "5h",
+            Some("weekly") => "周",
+            _ => continue,
+        };
+        let Some(remaining) = b.get("remainingFraction").and_then(fetch::as_f64) else {
+            continue;
+        };
+        windows.push(QuotaWindow {
+            label: label.into(),
+            used_percent: (1.0 - remaining) * 100.0,
+            resets_at: b.get("resetTime").and_then(super::parse_reset),
+        });
+    }
+    if windows.is_empty() {
+        return Err(ProviderError::ParseFailed);
+    }
+    // display order: 5h first, then weekly (matches other providers)
+    windows.sort_by_key(|w| if w.label == "5h" { 0 } else { 1 });
+    Ok(windows)
+}
+
+// ---------------------------------------------------------------------------
+// A) gemini-cli classic Code Assist flow
+// ---------------------------------------------------------------------------
 
 /// Google OAuth refresh with the public gemini-cli client credentials.
-/// Note: Antigravity's refresh_token is issued to its own OAuth client, so a
-/// self-refresh with these creds can fail with invalid_grant; by design the
-/// next poll then re-reads the IDE-refreshed credential (see module docs).
 async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
     const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
     const CLIENT_ID: &str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
@@ -113,10 +227,6 @@ async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oau
         extra_writes: vec![],
     })
 }
-
-// ---------------------------------------------------------------------------
-// A) gemini-cli classic flow
-// ---------------------------------------------------------------------------
 
 /// loadCodeAssist response → (project id, plan tier).
 pub fn parse_load(body: &str) -> Result<(String, Option<String>), ProviderError> {
@@ -182,117 +292,57 @@ pub fn parse_quota(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
     Ok(windows)
 }
 
-// ---------------------------------------------------------------------------
-// B) Antigravity flow: quota rides on fetchAvailableModels
-// ---------------------------------------------------------------------------
-
-/// fetchAvailableModels response → one window per shared gemini-* bucket
-/// (in practice they share a single rolling bucket; we report the worst).
-/// The bucket's resetTime is rolling-window semantics: the server leaves it
-/// in the past while the fraction keeps decaying (observed 2026-09-02), so a
-/// stale resetTime is dropped — showing "等待刷新…" forever is worse than "—".
-pub fn parse_models(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
-    let v: Value = serde_json::from_str(body).map_err(|_| ProviderError::ParseFailed)?;
-    let models = v
-        .get("models")
-        .and_then(|m| m.as_object())
-        .ok_or(ProviderError::ParseFailed)?;
-    let now = super::now_secs();
-    let mut worst: Option<QuotaWindow> = None;
-    for (key, m) in models.iter() {
-        if !key.starts_with("gemini-") {
-            continue;
-        }
-        let q = match m.get("quotaInfo") {
-            Some(q) => q,
-            None => continue,
-        };
-        let Some(remaining) = q.get("remainingFraction").and_then(fetch::as_f64) else {
-            continue;
-        };
-        let used = (1.0 - remaining) * 100.0;
-        let resets_at = q
-            .get("resetTime")
-            .and_then(super::parse_reset)
-            .filter(|t| *t > now); // stale rolling-window markers carry no info
-        let w = QuotaWindow {
-            label: "滚动".into(),
-            used_percent: used,
-            resets_at,
-        };
-        worst = Some(match worst {
-            None => w,
-            Some(cur) if w.used_percent > cur.used_percent => w,
-            Some(cur) => cur,
-        });
-    }
-    match worst {
-        Some(w) => Ok(vec![w]),
-        None => Err(ProviderError::ParseFailed),
-    }
-}
-
 fn map_status(status: u16) -> ProviderError {
     match status {
         401 => ProviderError::AuthExpired,
-        403 => ProviderError::UnsupportedClient, // Antigravity migration etc.
+        403 => ProviderError::UnsupportedClient, // consumer tier removed
         429 => ProviderError::RateLimited { retry_after: None },
         _ => ProviderError::Network,
     }
 }
 
 pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
-    let (token, source) = resolve_token().await?;
-
-    match source {
-        CredSource::Antigravity => {
-            let (status, body) = fetch::post_json_ua(
-                &format!("{}:fetchAvailableModels", BASE_DAILY),
-                &token,
-                Some(ANTIGRAVITY_UA),
-                &serde_json::json!({}),
-            )
-            .await
-            .map_err(|_| ProviderError::Network)?;
-            if !(200..300).contains(&status) {
-                return Err(map_status(status));
-            }
-            let windows = parse_models(&body)?;
-            Ok(QuotaSnapshot::ok(ID, NAME, Some("Antigravity".into()), windows, "official"))
-        }
-        CredSource::CliFile => {
-            let load_body = serde_json::json!({
-                "metadata": { "ideType": "IDE_UNSPECIFIED", "pluginType": "GEMINI" }
-            });
-            let (status, body) = fetch::post_json_ua(
-                &format!("{}:loadCodeAssist", BASE_CLASSIC),
-                &token,
-                None,
-                &load_body,
-            )
-            .await
-            .map_err(|_| ProviderError::Network)?;
-            if !(200..300).contains(&status) {
-                return Err(map_status(status));
-            }
-            let (project, plan) = parse_load(&body)?;
-
-            let quota_body = serde_json::json!({ "project": project });
-            let (status, body) = fetch::post_json_ua(
-                &format!("{}:retrieveUserQuota", BASE_CLASSIC),
-                &token,
-                None,
-                &quota_body,
-            )
-            .await
-            .map_err(|_| ProviderError::Network)?;
-            if !(200..300).contains(&status) {
-                return Err(map_status(status));
-            }
-            let windows = parse_quota(&body)?;
-            Ok(QuotaSnapshot::ok(ID, NAME, plan, windows, "official"))
-        }
+    // Antigravity channel first (this machine's reality); gemini-cli file as
+    // the classic alternative.
+    if cli_cred_path().is_none() && antigravity_installed() {
+        let windows = fetch_via_ls().await?;
+        return Ok(QuotaSnapshot::ok(ID, NAME, Some("Antigravity".into()), windows, "official"));
     }
+    let Some(path) = cli_cred_path() else {
+        return Err(ProviderError::CredentialMissing);
+    };
+    let (token, _source) = oauth::resolve_oauth_token(&path, &CLI_SPEC, refresh_call).await?;
+
+    let load_body = serde_json::json!({
+        "metadata": { "ideType": "IDE_UNSPECIFIED", "pluginType": "GEMINI" }
+    });
+    let (status, body) = fetch::post_json_ua(
+        &format!("{}:loadCodeAssist", BASE_CLASSIC),
+        &token,
+        None,
+        &load_body,
+    )
+    .await
+    .map_err(|_| ProviderError::Network)?;
+    if !(200..300).contains(&status) {
+        return Err(map_status(status));
+    }
+    let (project, plan) = parse_load(&body)?;
+
+    let quota_body = serde_json::json!({ "project": project });
+    let (status, body) = fetch::post_json_ua(
+        &format!("{}:retrieveUserQuota", BASE_CLASSIC),
+        &token,
+        None,
+        &quota_body,
+    )
+    .await
+    .map_err(|_| ProviderError::Network)?;
+    if !(200..300).contains(&status) {
+        return Err(map_status(status));
+    }
+    let windows = parse_quota(&body)?;
+    Ok(QuotaSnapshot::ok(ID, NAME, plan, windows, "official"))
 }
 
 #[cfg(test)]
@@ -366,58 +416,32 @@ mod tests {
         assert!(matches!(parse_load(r#"{"foo": 1}"#), Err(ProviderError::ParseFailed)));
     }
 
-    // ---- Antigravity fetchAvailableModels channel ----
+    // ---- Antigravity LS channel ----
 
     #[test]
-    fn parses_antigravity_models_shared_bucket() {
-        // real 2026-09 capture shape: all gemini-* share one bucket
-        let body = r#"{
-          "models": {
-            "chat_20706": { "isInternal": true, "quotaInfo": { "remainingFraction": 1 } },
-            "gemini-2.5-pro": { "displayName": "Gemini 2.5 Pro",
-              "quotaInfo": { "remainingFraction": 0.9084101, "resetTime": "2099-09-02T20:43:09Z" } },
-            "gemini-3.6-flash-medium": { "displayName": "Gemini 3.6 Flash (Medium)",
-              "quotaInfo": { "remainingFraction": 0.9084101, "resetTime": "2099-09-02T20:43:09Z" } },
-            "claude-opus-4-6-thinking": { "displayName": "Claude Opus 4.6 (Thinking)",
-              "quotaInfo": { "remainingFraction": 1, "resetTime": "2099-09-02T22:05:03Z" } }
-          }
-        }"#;
-        let w = parse_models(body).unwrap();
-        assert_eq!(w.len(), 1);
-        assert_eq!(w[0].label, "滚动");
-        assert!((w[0].used_percent - 9.16).abs() < 0.1);
-        assert!(w[0].resets_at.is_some(), "future resetTime survives");
+    fn parses_ls_quota_summary() {
+        // real 2026-09-03 capture from RetrieveUserQuotaSummary
+        let body = r#"{"response":{"groups":[
+          {"displayName":"Gemini Models","buckets":[
+            {"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.5305139,"resetTime":"2026-09-06T07:40:17Z"},
+            {"bucketId":"gemini-5h","window":"5h","remainingFraction":0.9217109,"resetTime":"2026-09-03T07:46:37Z"}]},
+          {"displayName":"Claude and GPT models","buckets":[
+            {"bucketId":"3p-weekly","window":"weekly","remainingFraction":1,"resetTime":"2026-09-10T02:54:21Z"},
+            {"bucketId":"3p-5h","window":"5h","remainingFraction":1,"resetTime":"2026-09-03T07:54:21Z"}]}
+        ]}}"#;
+        let w = parse_ls_quota(body).unwrap();
+        assert_eq!(w.len(), 2);
+        assert_eq!(w[0].label, "5h");
+        assert!((w[0].used_percent - 7.83).abs() < 0.1);
+        assert_eq!(w[1].label, "周");
+        assert!((w[1].used_percent - 46.95).abs() < 0.1);
+        assert!(w[0].resets_at.is_some() && w[1].resets_at.is_some());
     }
 
     #[test]
-    fn antigravity_stale_reset_time_is_dropped() {
-        // rolling-window marker left in the past (observed live 2026-09-02):
-        // must not produce an eternal "等待刷新…" countdown
-        let body = r#"{
-          "models": {
-            "gemini-a": { "quotaInfo": { "remainingFraction": 0.5, "resetTime": "2020-01-01T00:00:00Z" } }
-          }
-        }"#;
-        let w = parse_models(body).unwrap();
-        assert_eq!(w[0].resets_at, None);
-    }
-
-    #[test]
-    fn antigravity_models_worst_wins() {
-        let body = r#"{
-          "models": {
-            "gemini-a": { "quotaInfo": { "remainingFraction": 0.9 } },
-            "gemini-b": { "quotaInfo": { "remainingFraction": 0.2, "resetTime": 4000000000 } }
-          }
-        }"#;
-        let w = parse_models(body).unwrap();
-        assert!((w[0].used_percent - 80.0).abs() < 0.01);
-        assert_eq!(w[0].resets_at, Some(4000000000));
-    }
-
-    #[test]
-    fn antigravity_models_missing_quota_is_parse_error() {
-        assert!(matches!(parse_models(r#"{"models": {"chat_1": {}}}"#), Err(ProviderError::ParseFailed)));
-        assert!(matches!(parse_models("not json"), Err(ProviderError::ParseFailed)));
+    fn ls_quota_without_gemini_group_is_parse_error() {
+        let body = r#"{"response":{"groups":[{"displayName":"Claude and GPT models","buckets":[]}]}}"#;
+        assert!(matches!(parse_ls_quota(body), Err(ProviderError::ParseFailed)));
+        assert!(matches!(parse_ls_quota("not json"), Err(ProviderError::ParseFailed)));
     }
 }

@@ -83,15 +83,6 @@ pub async fn post_form(endpoint: &str, form: &[(&str, &str)]) -> Result<(u16, St
     Ok((status, text))
 }
 
-/// POST JSON body with Bearer auth; returns (status, body truncated to 1MB).
-pub async fn post_json(
-    endpoint: &str,
-    token: &str,
-    body: &Value,
-) -> Result<(u16, String), String> {
-    post_json_ua(endpoint, token, None, body).await
-}
-
 /// POST JSON with Bearer auth and an optional User-Agent override
 /// (Antigravity's daily-cloudcode-pa endpoint gates on it).
 pub async fn post_json_ua(

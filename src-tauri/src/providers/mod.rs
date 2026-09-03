@@ -74,6 +74,8 @@ pub enum ProviderError {
     ParseFailed,
     Network,
     UnsupportedClient,
+    /// Antigravity IDE (language server) not running — Gemini via IDE channel
+    IdeNotRunning,
 }
 
 impl ProviderError {
@@ -88,6 +90,7 @@ impl ProviderError {
             ProviderError::ParseFailed => "接口变更，请检查更新",
             ProviderError::Network => "网络无法连接",
             ProviderError::UnsupportedClient => "暂不支持，可在设置中停用",
+            ProviderError::IdeNotRunning => "Antigravity 未运行",
         }
     }
 }
