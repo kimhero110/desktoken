@@ -1,7 +1,9 @@
-﻿# QuotaBar 发版一条龙: bump → test → commit → tag → push → 盯 CI
+﻿# QuotaBar 发版一条龙: bump → test → commit → tag → push(GitHub+Gitee) → 盯 CI → Gitee 发行版
 # 用法: 在仓库根目录  powershell -ExecutionPolicy Bypass -File release.ps1 patch
 #       (patch / minor / major)
 # 设计原则: 版本号字段、tag、发布三处只在此脚本里同步, 任何人不手工改其中一处。
+# Gitee 发版需要 token: 环境变量 GITEE_TOKEN, 或本机文件 ~/.quotabar-gitee-token
+# （token 绝不提交进仓库 —— 本文件是公开的）
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('patch', 'minor', 'major')]
@@ -66,7 +68,6 @@ foreach ($remote in @('origin', 'gitee')) {
 }
 
 Write-Host "✓ v$new 已推送，CI 构建中（约 18 分钟）" -ForegroundColor Green
-
 # ---------- 6. 盯 CI ----------
 Start-Sleep 20
 $runId = $null
@@ -77,14 +78,94 @@ for ($i = 0; $i -lt 10; $i++) {
 }
 if (-not $runId) { Fail "没找到 CI run；去 https://github.com/kimhero110/desktoken/actions 看" }
 
+# ---------- 7. Gitee 发行版 ----------
+# JSON 字段中的非 ASCII 一律转 \uXXXX：Gitee API 把请求体当 GBK 解，
+# 直接发 UTF-8 中文必乱码（2026-09 实测）。token 从环境变量或本机文件读。
+function ConvertTo-JsonSafe([string]$s) {
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $s.ToCharArray()) {
+        $code = [int]$ch
+        if ($ch -eq '\') { $sb.Append('\\') | Out-Null }
+        elseif ($ch -eq '"') { $sb.Append('\"') | Out-Null }
+        elseif ($ch -eq "`n") { $sb.Append('\n') | Out-Null }
+        elseif ($ch -eq "`r") { $sb.Append('\r') | Out-Null }
+        elseif ($code -gt 127) { $sb.Append(('\u{0:x4}' -f $code)) | Out-Null }
+        else { $sb.Append($ch) | Out-Null }
+    }
+    $sb.ToString()
+}
+
+function Publish-GiteeRelease([string]$version) {
+    $token = $env:GITEE_TOKEN
+    if (-not $token) {
+        $tokenFile = Join-Path $env:USERPROFILE '.quotabar-gitee-token'
+        if (Test-Path $tokenFile) { $token = ([System.IO.File]::ReadAllText($tokenFile)).Trim() }
+    }
+    if (-not $token) {
+        Write-Host "⚠ 无 GITEE_TOKEN，跳过 Gitee 发行版（代码与 tag 已双推）" -ForegroundColor Yellow
+        return
+    }
+
+    $tag = "v$version"
+    $api = "https://gitee.com/api/v5/repos/xu512/quotabar"
+
+    # 已存在则复用（幂等：重跑脚本直接补传附件）
+    $existing = & curl.exe -s "$api/releases/tags/$tag`?access_token=$token"
+    $releaseId = $null
+    if ($existing -match '"id"\s*:\s*(\d+)') { $releaseId = $Matches[1] }
+
+    $bodyText = @"
+## QuotaBar $tag
+
+- 更新内容见 GitHub Release: https://github.com/kimhero110/desktoken/releases/tag/$tag
+
+### 安装
+- ``QuotaBar_${version}_x64-setup.exe``：NSIS 安装包
+- ``quotabar.exe``：绿色单文件
+- ``checksums.txt``：SHA-256 校验
+
+零遥测，凭据全在本机。
+"@
+    $payload = '{"access_token":"' + $token + '","tag_name":"' + $tag + '","name":"QuotaBar ' + $tag + '","body":"' + (ConvertTo-JsonSafe $bodyText) + '","target_commitish":"main"}'
+    $payloadFile = Join-Path $env:TEMP "quotabar-gitee-release-$tag.json"
+    [System.IO.File]::WriteAllText($payloadFile, $payload, [System.Text.Encoding]::ASCII)
+
+    if ($releaseId) {
+        & curl.exe -s -o $null -X PATCH -H "Content-Type: application/json" --data-binary "@$payloadFile" "$api/releases/$releaseId"
+        Write-Host "Gitee 发行版已存在，更新描述并补传附件"
+    } else {
+        $resp = & curl.exe -s -X POST -H "Content-Type: application/json" --data-binary "@$payloadFile" "$api/releases"
+        if ($resp -match '"id"\s*:\s*(\d+)') { $releaseId = $Matches[1] }
+    }
+    Remove-Item $payloadFile -ErrorAction SilentlyContinue
+    if (-not $releaseId) { Write-Host "⚠ Gitee 发行版创建失败，手动处理" -ForegroundColor Yellow; return }
+
+    # 从 GitHub 下载产物，传到 Gitee（跳过同名已传）
+    $dl = Join-Path $env:TEMP "quotabar-rel-$tag"
+    New-Item -ItemType Directory $dl -Force | Out-Null
+    gh release download $tag --repo kimhero110/desktoken --dir $dl 2>$null
+    $existingAssets = & curl.exe -s "$api/releases/$releaseId`?access_token=$token"
+    foreach ($f in (Get-ChildItem $dl)) {
+        if ($existingAssets -match [regex]::Escape('"' + $f.Name + '"')) {
+            Write-Host "  跳过已存在: $($f.Name)"
+            continue
+        }
+        $up = & curl.exe -s -X POST -F "file=@$($f.FullName)" "$api/releases/$releaseId/attach_files?access_token=$token"
+        if ($up -match '"id"') { Write-Host "  已传: $($f.Name)" } else { Write-Host "  失败: $($f.Name)" -ForegroundColor Yellow }
+    }
+    Remove-Item $dl -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "✓ Gitee v$new 发布成功: https://gitee.com/xu512/quotabar/releases/$tag" -ForegroundColor Green
+}
+
 Write-Host "CI run: https://github.com/kimhero110/desktoken/actions/runs/$runId"
 for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep 45
     $r = gh run view $runId --repo kimhero110/desktoken --json status,conclusion 2>$null | ConvertFrom-Json
     if ($r -and $r.status -eq 'completed') {
         if ($r.conclusion -eq 'success') {
-            Write-Host "✓ v$new 发布成功: https://github.com/kimhero110/desktoken/releases/tag/v$new" -ForegroundColor Green
+            Write-Host "✓ GitHub v$new 发布成功: https://github.com/kimhero110/desktoken/releases/tag/v$new" -ForegroundColor Green
             gh release view "v$new" --repo kimhero110/desktoken --json assets -q '.assets[].name'
+            Publish-GiteeRelease $new
         } else {
             Fail "CI 失败 ($($r.conclusion))，去 run 页面看日志"
         }
@@ -92,3 +173,4 @@ for ($i = 0; $i -lt 40; $i++) {
     }
 }
 Fail "CI 超时（40 轮×45s），去 actions 页面手动看"
+
