@@ -1,5 +1,7 @@
 # QuotaBar
 
+<p align="center"><img src="docs/icon-256.png" width="96" alt="QuotaBar logo" /></p>
+
 > **EN**: A tiny acrylic bar that lives on your Windows desktop and tells you exactly how much of your Claude / Kimi / Codex / GLM / Gemini quota is left — before the 429 does. Open source (MIT), zero telemetry, credentials never leave your machine. [Quick Start](#安装).
 
 ![QuotaBar 悬浮条](docs/screenshot.png)
@@ -31,13 +33,15 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 ## 功能特性
 
 - **悬浮条常驻桌面**：半透明 acrylic、置顶、整面拖动、**永不抢焦点**——在 VS Code 里打字时拖它，光标纹丝不动（这是血泪换来的 `WS_EX_NOACTIVATE`，不是吹的）
+- **左键点一下，展开详情卡**：每窗口的已用/剩余、重置的准确时刻、套餐与数据来源、官方页面直达链接，外加 **7 日用量 sparkline**（本地 SQLite，哪都不去）
 - **5 小时窗口 + 每周窗口 + 重置倒计时**：`43m / 2.1h / 3d4h`，扫一眼就知道现在该猛用还是该省着
 - **颜色告警**：绿 <70% → 黄 70-90%（带斜纹，色盲友好）→ 红 >90%。整条边框还会跟着变色，眼角余光就能感知
 - **Toast 提醒**：跨过 90% 叫你一声「要没了」；窗口重置时叫你一声「已重置，放开用」。就这两句，不多嘴
-- **迷你模式**：收成一条 22px 细条，左边是最紧张的那家用量，右边轮播程序员段子（深夜会自动切换成「该睡了」模式）
+- **迷你模式**：收成一条细血条，左边是最紧张的那家，右边轮播程序员段子；哪家超 90% 时段子自动让位成指路建议（「Kimi 周才 36%，先去那边写」）；深夜自动切换成「该睡了」
 - **凭据自动发现**：装了官方 CLI 就零配置出数。它自己读凭据、自己刷新 token、自己写回——和官方 CLI 一个姿势，不搞特殊
 - **自定义监视引擎**：任何「一个 GET 返回 JSON」的平台，设置里填四个框就能接入，不用写一行代码
 - **零遥测**：不联网汇报任何东西。它唯一会「说出去」的，是你手动复制的诊断信息（而且先过脱敏层）
+- **Windows + macOS**：Windows 10/11 为第一公民；macOS 版从源码构建或等 dmg（CI 已出包）
 
 ## 支持平台
 
@@ -56,10 +60,10 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 ### 下载（推荐）
 
-[GitHub Releases](https://github.com/kimhero110/desktoken/releases)：
+[GitHub Releases](https://github.com/kimhero110/desktoken/releases)（国内慢就用 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)）：
 
-- **`QuotaBar_x64-setup.exe`** —— 安装包（自动处理 WebView2）
-- **`quotabar.exe`** —— 绿色单文件，扔哪儿跑哪儿
+- **Windows**：`QuotaBar_x64-setup.exe`（安装包，自动处理 WebView2）或 `quotabar.exe`（绿色单文件，扔哪儿跑哪儿）
+- **macOS**：`QuotaBar_x64.dmg`（拖进 Applications 即可）
 
 国内下载慢：链接前面拼你常用的 GitHub 加速镜像即可，文件在 Release 附件里，镜像站通用。
 
@@ -120,9 +124,9 @@ reset 字段自动识别 epoch 秒/毫秒/RFC3339。接进来就和内置五家�
 
 天下没有不散的额度。要删的话：
 
-- 设置与状态：`%APPDATA%\quotabar\settings.json`
-- 日志：`%APPDATA%\quotabar\spike.log`
-- 手动 key：凭据管理器里服务名 `quotabar` 的条目
+- 设置与状态：`%APPDATA%\quotabar\settings.json`（macOS：`~/Library/Application Support/quotabar/`）
+- 日志：同目录下 `spike.log`；用量历史：同目录下 `history.db`
+- 手动 key：Windows 凭据管理器（服务名 `quotabar`）/ macOS Keychain
 - 开机自启：设置里关（注册表 `HKCU\...\Run\QuotaBar`）
 
 删完这些就干净了。Antigravity 的凭据条目我们不动——那是人家的东西，借读已是承情。
