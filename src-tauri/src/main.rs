@@ -301,7 +301,7 @@ fn open_tos_window(app: &tauri::AppHandle) {
         return;
     }
     let _ = WebviewWindowBuilder::new(app, "tos", WebviewUrl::App("tos.html".into()))
-        .title("DeskToken — 使用前请知悉")
+        .title("QuotaBar — 使用前请知悉")
         .inner_size(380.0, 300.0)
         .resizable(false)
         .maximizable(false)
@@ -309,7 +309,6 @@ fn open_tos_window(app: &tauri::AppHandle) {
         .always_on_top(true)
         .skip_taskbar(false)
         .decorations(true)
-        .transparent(false)
         .center()
         .focused(true)
         .build();
@@ -534,14 +533,13 @@ fn open_settings_window(app: &tauri::AppHandle) {
         return;
     }
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
-        .title("DeskToken 设置")
+        .title("QuotaBar 设置")
         .inner_size(480.0, 560.0)
         .resizable(false)
         .maximizable(false)
         .always_on_top(false)
         .skip_taskbar(false)
         .decorations(true)
-        .transparent(false)
         .center()
         .focused(true)
         .build();
