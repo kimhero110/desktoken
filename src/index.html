@@ -23,7 +23,10 @@
     user-select: none; -webkit-user-select: none;
   }
   #bar {
-    border-radius: 10px;
+    /* square corners: the window is square and acrylic-backed; a rounded bar
+       used to reveal gray acrylic triangles at the corners. Square bar ==
+       zero reveal on every Windows version. */
+    border-radius: 0;
     background: var(--bg);
     border: 1px solid var(--border);
     padding: 8px 10px;
@@ -48,10 +51,14 @@
   .cd { width: 44px; text-align: right; font-size: 11px; color: var(--text-dim); margin-left: 6px; }
   .errline { font-size: 10px; color: var(--stale); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .dimmed { opacity: 0.5; }
-  #strip { display: none; height: 20px; line-height: 20px; font-size: 10px; font-weight: 600; color: var(--text); }
+  #strip { display: none; height: 22px; line-height: 22px; font-size: 10px; font-weight: 600; color: var(--text); }
   #strip .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin: 0 5px 1px 0; vertical-align: middle; }
   #strip #strip-title { color: var(--text-dim); font-weight: 400; }
   #strip #strip-worst { font-variant-numeric: tabular-nums; margin-left: 5px; }
+  #strip #strip-msg {
+    float: right; max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    color: var(--text-dim); font-weight: 400; font-style: italic;
+  }
   #notice {
     display: none; font-size: 10px; color: var(--text-dim); line-height: 1.5;
     padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--border);
@@ -68,18 +75,13 @@
   #empty .t1 { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
   #empty .t2 { font-size: 10px; color: var(--text-dim); }
   body.mini #bar > .provider, body.mini #bar > #empty, body.mini #bar > #notice, body.mini #bar > #updatebar { display: none !important; }
-  body.mini #bar {
-    padding: 0 10px;
-    /* crystal strip: let the acrylic breathe through (!important wins over
-       the inline opacity style from settings) */
-    background: rgba(18, 18, 22, 0.45) !important;
-  }
+  body.mini #bar { padding: 0 10px; }
   body.mini #strip { display: block; }
 </style>
 </head>
 <body>
 <div id="bar" data-tauri-drag-region>
-  <div id="strip"><span class="dot" id="strip-dot"></span><span id="strip-title">QuotaBar</span><span id="strip-worst"></span></div>
+  <div id="strip"><span class="dot" id="strip-dot"></span><span id="strip-title">QuotaBar</span><span id="strip-worst"></span><span id="strip-msg"></span></div>
   <div id="updatebar"><span class="x" id="up-x">×</span><span id="up-text"></span> <a href="#" id="up-view">查看</a> · <span class="skip" id="up-skip">跳过此版本</span></div>
   <div id="notice"></div>
   <div id="empty">
@@ -181,10 +183,38 @@
     refit();
   }
 
+  // ---- mini strip: programmer memes + time-based care (rotates each tick) ----
+  const MEMES = [
+    "它在我机器上是好的", "先重启试试", "这不是 bug，是 feature", "编译中 ≈ 带薪休假",
+    "改一个 bug，冒出俩", "TODO: 以后再优化", "生产环境才是测试环境",
+    "复制粘贴也是一种复用", "周五别 force push", "这个临时方案已经三年了",
+    "每个 else 都是一次妥协", "先有 README 再有真相", "缓存和命名是两大难题",
+    "代码能跑就别动", "写注释是给自己留情面",
+  ];
+  function stripMessage() {
+    const now = new Date();
+    const h = now.getHours();
+    const d = now.getDay();
+    if (h >= 23 || h < 5) return "夜深了，眼睛和颈椎都重要";
+    if (h < 9) return "早，先喝水再写代码";
+    if (h >= 11 && h < 13) return "到点了，先吃饭";
+    if (h >= 17 && h < 19) return "下班前记得提交";
+    if (d === 5 && h >= 15) return "周五下午，别开新坑";
+    if (d === 1 && h < 10) return "周一早上，慢慢来";
+    return MEMES[Math.floor(Date.now() / 30000) % MEMES.length];
+  }
+
   // ---- layout ownership (frontend owns height; kills the dead zone) ----
   function refit() {
     const mini = document.body.classList.contains("mini");
-    invoke("autosize", { height: mini ? 20 : bar.offsetHeight });
+    if (mini) {
+      document.getElementById("strip-msg").textContent = stripMessage();
+      // width hugs the strip content (no dead space on the right)
+      const w = Math.min(360, Math.max(140, document.getElementById("strip").scrollWidth + 22));
+      invoke("autosize", { height: 22, width: w });
+    } else {
+      invoke("autosize", { height: bar.offsetHeight, width: null });
+    }
   }
   window.addEventListener("load", refit);
 

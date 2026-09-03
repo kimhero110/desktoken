@@ -90,18 +90,16 @@ fn apply_noactivate(window: &WebviewWindow) {
 #[cfg(not(target_os = "windows"))]
 fn apply_noactivate(_window: &WebviewWindow) {}
 
-/// Round the OS window corners. Tried DWMWA_WINDOW_CORNER_PREFERENCE first
-/// (Win11); on Windows Server / Win10 DWM ignores it silently, so we always
-/// also clip with a round-rect window region — the gray acrylic triangles at
-/// the corners are physically cut away. Region must be re-applied on resize
-/// (called from autosize).
+/// Round the OS window corners via DWM (Win11 only; silently ignored on
+/// Server/Win10 — the bar draws square corners itself, so this is pure bonus).
+/// NOTE: SetWindowRgn was tried and made the gray WORSE (acrylic fringe
+/// artifact along the region edge) — do not re-add.
 #[cfg(target_os = "windows")]
 fn apply_rounded_corners(window: &WebviewWindow) {
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
     };
-    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
     if let Ok(hwnd) = window.hwnd() {
         let raw: HWND = hwnd.0 as HWND;
         let pref = DWMWCP_ROUND;
@@ -112,13 +110,6 @@ fn apply_rounded_corners(window: &WebviewWindow) {
                 &pref as *const _ as *const _,
                 std::mem::size_of_val(&pref) as u32,
             );
-            if let Ok(size) = window.outer_size() {
-                let (w, h) = (size.width as i32, size.height as i32);
-                let r = (10.0 * window.scale_factor().unwrap_or(1.0)).round() as i32;
-                let rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2);
-                // SetWindowRgn takes ownership of the region handle
-                SetWindowRgn(raw, rgn, 1);
-            }
         }
     }
 }
@@ -233,7 +224,9 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
     let refresh = MenuItemBuilder::with_id("refresh", if is_zh_locale() { "立即刷新" } else { "Refresh Now" })
         .enabled(!refresh_cooling_down())
         .build(app)?;
-    let mini = CheckMenuItemBuilder::with_id("mini_mode", if is_zh_locale() { "迷你模式" } else { "Mini Mode" }).build(app)?;
+    let mini = CheckMenuItemBuilder::with_id("mini_mode", if is_zh_locale() { "迷你模式" } else { "Mini Mode" })
+        .checked(settings::load().mini_mode)
+        .build(app)?;
     let diag = MenuItemBuilder::with_id("diag", if is_zh_locale() { "复制诊断信息" } else { "Copy Diagnostics" }).build(app)?;
     let check_update = MenuItemBuilder::with_id("check_update", if is_zh_locale() { "检查更新" } else { "Check for Updates" }).build(app)?;
     let report = MenuItemBuilder::with_id("report", if is_zh_locale() { "在 GitHub 报告问题" } else { "Report Issue on GitHub" }).build(app)?;
@@ -510,16 +503,15 @@ pub(crate) fn rustlog(msg: String) {
 }
 
 #[tauri::command]
-fn autosize(window: WebviewWindow, height: f64) {
+fn autosize(window: WebviewWindow, height: f64, width: Option<f64>) {
     let h = height.clamp(20.0, 800.0);
     let s = settings::load();
     let sf = window.scale_factor().unwrap_or(1.0);
     // PHYSICAL size: tao LogicalSize conversion misfires on mixed-DPI setups
-    let phys = tauri::PhysicalSize::new((s.width * sf).round() as u32, (h * sf).round() as u32);
-    rustlog(format!("autosize: req={} -> phys {:?}", height, phys));
+    let w = width.unwrap_or(s.width).clamp(120.0, 400.0);
+    let phys = tauri::PhysicalSize::new((w * sf).round() as u32, (h * sf).round() as u32);
+    rustlog(format!("autosize: req={}x{:?} -> phys {:?}", height, width, phys));
     let _ = window.set_size(phys);
-    // round-rect clip must follow the new size (corners otherwise regrow gray)
-    apply_rounded_corners(&window);
 }
 
 // ---------------------------------------------------------------------------
