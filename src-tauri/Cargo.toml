@@ -1,6 +1,6 @@
 [package]
 name = "quotabar"
-version = "0.2.2"
+version = "0.2.3"
 description = "AI coding quota floating bar"
 edition = "2021"
 
