@@ -16,13 +16,14 @@ $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
 function Fail($msg) { Write-Host "✗ $msg" -ForegroundColor Red; exit 1 }
 
-# ---------- 1. 工作区必须干净（先查，再动版本字段） ----------
+# ---------- 1. 工作区检查（先查，再动版本字段） ----------
+# 允许的唯一例外：上次发版在测试门禁挂了，版本字段已 bump 但未提交 ——
+# 若仅有的改动就是版本文件且内容已是目标版本，视为可续跑。
 git -C $RepoRoot diff --quiet
 $clean1 = $LASTEXITCODE -eq 0
 git -C $RepoRoot diff --cached --quiet
 $clean2 = $LASTEXITCODE -eq 0
 $untracked = git -C $RepoRoot ls-files --others --exclude-standard
-if (-not ($clean1 -and $clean2) -or $untracked) { Fail "工作区不干净，先提交或还原其它改动" }
 
 # ---------- 2. 读当前版本并 bump ----------
 $cargoToml = Join-Path $RepoRoot 'src-tauri\Cargo.toml'
@@ -41,15 +42,38 @@ switch ($Part) {
 $new = "$($cur.Major).$($cur.Minor).$($cur.Patch)"
 Write-Host "版本: $old → $new"
 
+# 续跑判定：工作区仅剩版本文件改动且已是 $old→$new 的中间态
+if (-not ($clean1 -and $clean2) -or $untracked) {
+    $dirtyFiles = git -C $RepoRoot diff --name-only
+    $versionFiles = @('src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json')
+    $onlyVersionFiles = ($dirtyFiles | Where-Object { $versionFiles -notcontains $_ }).Count -eq 0 -and -not $untracked
+    if (-not $onlyVersionFiles) { Fail "工作区不干净，先提交或还原其它改动" }
+    Write-Host "续跑：版本字段已在工作区（上次测试门禁中断）" -ForegroundColor Yellow
+    # 版本字段已经是 $new，不要再 bump 一遍 —— 上一步的 $cur 是文件里的旧值，
+    # 说明文件还没 bump；若文件已是 $new 则 $old 会等于 $new-1 档。
+    # 幂等处理：若文件已含 $new，跳过写入。
+    if ($cargoText -match [regex]::Escape("version = `"$new`"")) {
+        Write-Host "版本字段已是 $new，跳过 bump"
+    } else {
+        [System.IO.File]::WriteAllText($cargoToml, ($cargoText -replace '(?m)^version = "[\d.]+"', "version = `"$new`""))
+    }
+} else {
+    [System.IO.File]::WriteAllText($cargoToml, ($cargoText -replace '(?m)^version = "[\d.]+"', "version = `"$new`""))
+}
+
 # ---------- 3. 同步两处版本字段 ----------
 [System.IO.File]::WriteAllText($cargoToml, ($cargoText -replace '(?m)^version = "[\d.]+"', "version = `"$new`""))
 $confText = [System.IO.File]::ReadAllText($tauriConf)
 if ($confText -notmatch '"version": "[\d.]+"') { Fail "tauri.conf.json 里找不到 version" }
 [System.IO.File]::WriteAllText($tauriConf, ($confText -replace '"version": "[\d.]+"', "`"version`": `"$new`""))
 
-# ---------- 4. 测试门禁 ----------
-Write-Host "跑测试..." -ForegroundColor Cyan
-Push-Location (Join-Path $RepoRoot 'src-tauri')
+# ---------- 4. 测试门禁（本地镜像上跑，共享盘上 cargo 构建不可靠） ----------
+# 原因: rc.exe 不识别 UNC 长路径; 且 cargo 在共享上的增量缓存已腐化过一次。
+Write-Host "跑测试（本地镜像）..." -ForegroundColor Cyan
+$mir = Join-Path $env:TEMP "quotabar-release-src"
+robocopy $RepoRoot $mir /MIR /XD target /NFL /NDL /NJH /NJS /XF .git | Out-Null
+$env:CARGO_TARGET_DIR = Join-Path $env:TEMP "quotabar-release-target"
+Push-Location (Join-Path $mir 'src-tauri')
 try {
     cargo test
     if ($LASTEXITCODE -ne 0) { Fail "测试未通过，不发版" }
