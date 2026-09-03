@@ -321,10 +321,9 @@ fn accept_tos(app: tauri::AppHandle) -> Result<(), String> {
     settings::save(&s).map_err(|e| e.to_string())?;
     // E4 magical moment: auto-discovered providers are enabled by default
     // (empty enabled_providers = all), fetch immediately, notify 3s.
-    let names: Vec<String> = credentials::detect()
+    let names: Vec<String> = credentials::discover_instances()
         .into_iter()
-        .filter(|c| c.status != "missing")
-        .map(|c| c.name)
+        .map(|i| i.name)
         .collect();
     if let Some(w) = app.get_webview_window("main") {
         reveal_main(&w);
@@ -579,6 +578,24 @@ fn detect_credentials() -> Vec<credentials::ProviderCredInfo> {
     credentials::detect()
 }
 
+/// 方案 B: all discovered credential instances (CLI / opencode / manual).
+#[tauri::command]
+fn list_instances() -> Vec<credentials::InstanceDesc> {
+    credentials::discover_instances()
+}
+
+/// Per-instance toggle: off-list in settings.disabled_instances.
+#[tauri::command]
+fn set_instance_enabled(id: String, enabled: bool) -> Result<(), String> {
+    let mut s = settings::load();
+    if enabled {
+        s.disabled_instances.retain(|x| x != &id);
+    } else if !s.disabled_instances.contains(&id) {
+        s.disabled_instances.push(id);
+    }
+    settings::save(&s).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn save_manual_key(provider_id: String, key: String) -> Result<(), String> {
     let k = credentials::normalize_key(&key);
@@ -690,6 +707,8 @@ fn main() {
             autosize,
             apply_appearance,
             detect_credentials,
+            list_instances,
+            set_instance_enabled,
             save_manual_key,
             delete_manual_key,
             set_provider_enabled,

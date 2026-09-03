@@ -102,6 +102,27 @@ pub fn now_secs() -> EpochSecs {
         .unwrap_or(0)
 }
 
+/// Fetch one provider instance (方案 B): id is "codex" / "codex#opencode" /
+/// custom def id. Stamp the snapshot with the instance id + display name so
+/// rows, toasts and history are per-account.
+pub async fn fetch_instance(
+    id: &str,
+    name: &str,
+) -> Result<QuotaSnapshot, ProviderError> {
+    let (base, _suffix) = id.split_once('#').unwrap_or((id, ""));
+    let mut snap = match base {
+        "kimi" => kimi::fetch_instance(id).await?,
+        "glm" => glm::fetch_instance(id).await?,
+        "codex" => codex::fetch_instance(id).await?,
+        "claude" => claude::fetch_snapshot().await?,
+        "gemini" => gemini::fetch_snapshot().await?,
+        _ => return Err(ProviderError::CredentialMissing),
+    };
+    snap.provider_id = id.to_string();
+    snap.provider_name = name.to_string();
+    Ok(snap)
+}
+
 /// Parse reset time: epoch seconds, epoch milliseconds, or RFC3339 string.
 pub fn parse_reset(v: &serde_json::Value) -> Option<EpochSecs> {
     match v {

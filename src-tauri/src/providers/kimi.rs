@@ -160,9 +160,8 @@ pub fn parse_value(v: &serde_json::Value) -> Result<QuotaSnapshot, ProviderError
     Ok(QuotaSnapshot::ok(ID, NAME, plan, windows, "official"))
 }
 
-pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
-    let (token, _source) = resolve_token().await?;
-    let (status, body) = fetch::get_with_auth(ENDPOINT, "Authorization", "Bearer ", &token)
+async fn fetch_with_bearer(token: &str) -> Result<QuotaSnapshot, ProviderError> {
+    let (status, body) = fetch::get_with_auth(ENDPOINT, "Authorization", "Bearer ", token)
         .await
         .map_err(|_| ProviderError::Network)?;
     match status {
@@ -170,6 +169,28 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
         401 | 403 => Err(ProviderError::AuthExpired),
         429 => Err(ProviderError::RateLimited { retry_after: None }),
         _ => Err(ProviderError::Network),
+    }
+}
+
+pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
+    let (token, _source) = resolve_token().await?;
+    fetch_with_bearer(&token).await
+}
+
+/// Multi-instance entry (方案 B): "kimi" (CLI/manual) or "kimi#opencode".
+pub async fn fetch_instance(inst: &str) -> Result<QuotaSnapshot, ProviderError> {
+    match inst {
+        "kimi#opencode" => {
+            match crate::credentials::opencode_cred("kimi-for-coding") {
+                Some(crate::credentials::OpencodeCred::ApiKey(k)) => {
+                    let mut s = fetch_with_bearer(&k).await?;
+                    s.source = "manual_key".into();
+                    Ok(s)
+                }
+                _ => Err(ProviderError::CredentialMissing),
+            }
+        }
+        _ => fetch_snapshot().await,
     }
 }
 

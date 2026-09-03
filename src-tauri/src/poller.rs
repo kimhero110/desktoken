@@ -126,22 +126,6 @@ fn evaluate_alerts(app: &AppHandle, prev: Option<QuotaSnapshot>, snap: &QuotaSna
     }
 }
 
-async fn run_kimi() -> Result<QuotaSnapshot, providers::ProviderError> {
-    providers::kimi::fetch_snapshot().await
-}
-async fn run_glm() -> Result<QuotaSnapshot, providers::ProviderError> {
-    providers::glm::fetch_snapshot().await
-}
-async fn run_codex() -> Result<QuotaSnapshot, providers::ProviderError> {
-    providers::codex::fetch_snapshot().await
-}
-async fn run_claude() -> Result<QuotaSnapshot, providers::ProviderError> {
-    providers::claude::fetch_snapshot().await
-}
-async fn run_gemini() -> Result<QuotaSnapshot, providers::ProviderError> {
-    providers::gemini::fetch_snapshot().await
-}
-
 fn spawn_provider<F, Fut>(
     app: AppHandle,
     id: String,
@@ -192,45 +176,43 @@ fn spawn_provider<F, Fut>(
     });
 }
 
-/// Start polling for all configured providers. Called once at startup.
+/// Start polling for all configured provider instances. Called once at startup.
 /// ToS gate: caller must ensure consent before any network request.
+/// 方案 B: every discovered credential = one row (CLI + opencode + manual).
 pub fn start(app: AppHandle) {
     let s = settings::load();
 
-    let enabled = |id: &str| {
-        s.enabled_providers.is_empty() || s.enabled_providers.iter().any(|p| p == id)
+    let enabled_base = |base: &str| {
+        s.enabled_providers.is_empty() || s.enabled_providers.iter().any(|p| p == base)
     };
 
-    // tell the frontend which providers are coming so it can render
-    // per-provider loading placeholders (design spec: 加载态)
-    let mut init: Vec<(&str, &str)> = vec![];
-    if enabled("kimi") { init.push(("kimi", "Kimi")); }
-    if enabled("glm") { init.push(("glm", "GLM")); }
-    if enabled("codex") { init.push(("codex", "Codex")); }
-    if enabled("claude") { init.push(("claude", "Claude")); }
-    if enabled("gemini") { init.push(("gemini", "Gemini")); }
-    for def in &s.custom_providers {
-        init.push((def.id.as_str(), def.name.as_str()));
-    }
-    let _ = app.emit("providers-init", init.iter().map(|(i, n)| serde_json::json!({"id": i, "name": n})).collect::<Vec<_>>());
+    // base-level polling floors (PLAN.md decisions)
+    let period_for = |base: &str| match base {
+        "claude" => 600, // ≥10min, ToS clamp
+        "gemini" => 300, // ≥5min
+        _ => 120,
+    };
 
-    if enabled("kimi") {
-        spawn_provider(app.clone(), "kimi".into(), "Kimi".into(), 120, || run_kimi());
-    }
-    if enabled("glm") {
-        spawn_provider(app.clone(), "glm".into(), "GLM".into(), 120, || run_glm());
-    }
-    if enabled("codex") {
-        spawn_provider(app.clone(), "codex".into(), "Codex".into(), 120, || run_codex());
-    }
-    if enabled("claude") {
-        // Claude polling is clamped to >= 10 min (PLAN.md ToS decision);
-        // 429 backoff doubles from this floor (max 8x).
-        spawn_provider(app.clone(), "claude".into(), "Claude".into(), 600, || run_claude());
-    }
-    if enabled("gemini") {
-        // Gemini polling is clamped to >= 5 min (PLAN.md decision #12).
-        spawn_provider(app.clone(), "gemini".into(), "Gemini".into(), 300, || run_gemini());
+    let instances: Vec<crate::credentials::InstanceDesc> =
+        crate::credentials::discover_instances()
+            .into_iter()
+            .filter(|i| enabled_base(&i.base) && !s.disabled_instances.contains(&i.id))
+            .collect();
+
+    // tell the frontend which providers are coming (loading placeholders)
+    let init: Vec<serde_json::Value> = instances
+        .iter()
+        .map(|i| serde_json::json!({ "id": i.id, "name": i.name }))
+        .collect();
+    let _ = app.emit("providers-init", init);
+
+    for inst in instances {
+        let period = period_for(&inst.base);
+        spawn_provider(app.clone(), inst.id.clone(), inst.name.clone(), period, move || {
+            let id = inst.id.clone();
+            let name = inst.name.clone();
+            async move { providers::fetch_instance(&id, &name).await }
+        });
     }
     for def in s.custom_providers {
         let period = def.poll_minutes.max(1) * 60;

@@ -162,11 +162,9 @@ pub fn parse(body: &str) -> Result<QuotaSnapshot, ProviderError> {
     Ok(QuotaSnapshot::ok(ID, NAME, plan, windows, "official"))
 }
 
-pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
-    let path = cred_path()?;
-    let (token, _source) = oauth::resolve_oauth_token(&path, &CRED_SPEC, refresh_call).await?;
+async fn fetch_with_token(token: &str, account_id: &str) -> Result<QuotaSnapshot, ProviderError> {
     let auth = format!("Bearer {}", token);
-    let acct = account_id(&path).unwrap_or_default();
+    let acct = account_id.to_string();
     let (status, body) = fetch::get_json(
         ENDPOINT,
         &[("Authorization", &auth), ("chatgpt-account-id", &acct)],
@@ -178,6 +176,37 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
         401 | 403 => Err(ProviderError::AuthExpired),
         429 => Err(ProviderError::RateLimited { retry_after: None }),
         _ => Err(ProviderError::Network),
+    }
+}
+
+pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
+    let path = cred_path()?;
+    let (token, _source) = oauth::resolve_oauth_token(&path, &CRED_SPEC, refresh_call).await?;
+    let acct = account_id(&path).unwrap_or_default();
+    fetch_with_token(&token, &acct).await
+}
+
+/// Multi-instance entry (方案 B): "codex" (CLI) or "codex#opencode".
+/// opencode's OAuth is READ-ONLY for us: its refresh token belongs to
+/// opencode's client, so we use the access token while fresh and let
+/// opencode do the refreshing (same pattern as Antigravity).
+pub async fn fetch_instance(inst: &str) -> Result<QuotaSnapshot, ProviderError> {
+    match inst {
+        "codex#opencode" => {
+            let Some(crate::credentials::OpencodeCred::ChatGptOauth {
+                access,
+                expires_ms,
+                account_id,
+            }) = crate::credentials::opencode_cred("openai")
+            else {
+                return Err(ProviderError::CredentialMissing);
+            };
+            if expires_ms / 1000 <= super::now_secs() + 300 {
+                return Err(ProviderError::AuthExpired);
+            }
+            fetch_with_token(&access, &account_id).await
+        }
+        _ => fetch_snapshot().await,
     }
 }
 

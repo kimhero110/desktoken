@@ -100,10 +100,9 @@ pub fn parse_value(v: &serde_json::Value) -> Result<QuotaSnapshot, ProviderError
     Ok(QuotaSnapshot::ok(ID, NAME, plan, windows, "manual_key"))
 }
 
-pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
-    let key = credentials::keyring_get(ID).ok_or(ProviderError::CredentialMissing)?;
+async fn fetch_with_key(key: &str) -> Result<QuotaSnapshot, ProviderError> {
     // CN first, global fallback on 401/403 (wrong-region key)
-    let (status, body) = fetch::get_with_auth(ENDPOINT_CN, "Authorization", "", &key)
+    let (status, body) = fetch::get_with_auth(ENDPOINT_CN, "Authorization", "", key)
         .await
         .map_err(|_| ProviderError::Network)?;
     let try_parse = |b: &str| {
@@ -119,7 +118,7 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
     match status {
         200..=299 => return try_parse(&body),
         401 | 403 => {
-            let (status2, body2) = fetch::get_with_auth(ENDPOINT_GLOBAL, "Authorization", "", &key)
+            let (status2, body2) = fetch::get_with_auth(ENDPOINT_GLOBAL, "Authorization", "", key)
                 .await
                 .map_err(|_| ProviderError::Network)?;
             return match status2 {
@@ -131,6 +130,24 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
         }
         429 => Err(ProviderError::RateLimited { retry_after: None }),
         _ => Err(ProviderError::Network),
+    }
+}
+
+pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
+    let key = credentials::keyring_get(ID).ok_or(ProviderError::CredentialMissing)?;
+    fetch_with_key(&key).await
+}
+
+/// Multi-instance entry (方案 B): "glm" (manual key) or "glm#opencode".
+pub async fn fetch_instance(inst: &str) -> Result<QuotaSnapshot, ProviderError> {
+    match inst {
+        "glm#opencode" => {
+            match credentials::opencode_cred("zhipuai-coding-plan") {
+                Some(credentials::OpencodeCred::ApiKey(k)) => fetch_with_key(&k).await,
+                _ => Err(ProviderError::CredentialMissing),
+            }
+        }
+        _ => fetch_snapshot().await,
     }
 }
 

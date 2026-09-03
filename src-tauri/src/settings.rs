@@ -37,6 +37,10 @@ pub struct Settings {
     pub mini_mode: bool,
     pub tos_accepted: bool,
     pub enabled_providers: Vec<String>,
+    /// Multi-instance (B 方案): instance ids turned OFF individually
+    /// (e.g. "codex#opencode"). enabled_providers stays base-level.
+    #[serde(default)]
+    pub disabled_instances: Vec<String>,
     pub poll_intervals: std::collections::HashMap<String, u64>,
     #[serde(default)]
     pub skipped_version: Option<String>,
@@ -65,6 +69,7 @@ impl Default for Settings {
             mini_mode: false,
             tos_accepted: false,
             enabled_providers: vec![],
+            disabled_instances: vec![],
             poll_intervals: Default::default(),
             skipped_version: None,
             custom_providers: vec![],

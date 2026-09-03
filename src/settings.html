@@ -122,14 +122,23 @@
   wsel.addEventListener("change", applyAppearance);
   ct.addEventListener("change", applyAppearance);
 
-  // ---- builtin providers ----
+  // ---- builtin providers + credential instances (方案 B) ----
   async function loadProviders() {
     const list = await invoke("detect_credentials");
+    const instances = await invoke("list_instances");
     const settings = await invoke("get_settings");
     const wrap = $("providers");
     wrap.innerHTML = "";
     for (const p of list) {
       const enabled = settings.enabled_providers.includes(p.id);
+      const myInstances = instances.filter(i => i.base === p.id);
+      const instRows = myInstances.map(i => {
+        const on = !settings.disabled_instances.includes(i.id);
+        return `<div class="row" style="margin-top:6px; padding-left:22px;">
+          <input type="checkbox" ${on ? "checked" : ""} data-inst="${i.id}" class="inst-toggle" />
+          <label for="" style="margin:0">${i.name}</label>
+        </div>`;
+      }).join("");
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
@@ -139,6 +148,7 @@
           <span class="status ${p.status}">${p.status === "auto" ? "✓ 自动检测" : p.status === "manual" ? "✓ 手动 key" : "未配置"}</span>
         </div>
         <div class="note">${p.detail}</div>
+        ${myInstances.length > 1 ? `<div class="note" style="margin-top:6px;">本机发现 ${myInstances.length} 个账号（同屏各自显示）：</div>${instRows}` : ""}
         ${p.supports_manual_key ? `
         <div class="keyrow">
           <input type="password" placeholder="粘贴 API key" data-key="${p.id}" class="mono" />
@@ -152,6 +162,8 @@
     }
     wrap.querySelectorAll(".enable").forEach(cb =>
       cb.addEventListener("change", () => invoke("set_provider_enabled", { providerId: cb.dataset.id, enabled: cb.checked })));
+    wrap.querySelectorAll(".inst-toggle").forEach(cb =>
+      cb.addEventListener("change", () => invoke("set_instance_enabled", { id: cb.dataset.inst, enabled: cb.checked })));
     wrap.querySelectorAll("[data-save]").forEach(b => b.addEventListener("click", async () => {
       const id = b.dataset.save;
       const key = wrap.querySelector(`[data-key="${id}"]`).value;
