@@ -1,4 +1,6 @@
-// DeskToken — M1 Lane A: window skeleton + spike A (NOACTIVATE / acrylic / drag / no-focus-steal)
+// QuotaBar — quota floating bar. Release builds are pure GUI: no console window.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// M1 Lane A: window skeleton + spike A (NOACTIVATE / acrylic / drag / no-focus-steal)
 //                 + tray + single-instance + position clamp (work-area aware)
 
 /// UI language detection for the tray menu. On Windows, env LANG is usually
@@ -88,11 +90,38 @@ fn apply_noactivate(window: &WebviewWindow) {
 #[cfg(not(target_os = "windows"))]
 fn apply_noactivate(_window: &WebviewWindow) {}
 
+/// Round the OS window corners (DWM, Windows 11+). The bar itself is rounded
+/// (10px), but without this the square window corners show through as gray
+/// acrylic triangles. Falls back silently on Win10.
+#[cfg(target_os = "windows")]
+fn apply_rounded_corners(window: &WebviewWindow) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+    };
+    if let Ok(hwnd) = window.hwnd() {
+        let raw: HWND = hwnd.0 as HWND;
+        let pref = DWMWCP_ROUND;
+        unsafe {
+            DwmSetWindowAttribute(
+                raw,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                &pref as *const _ as *const _,
+                std::mem::size_of_val(&pref) as u32,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_rounded_corners(_window: &WebviewWindow) {}
+
 /// Show the bar and (re)apply NOACTIVATE. Used at startup and after ToS consent.
 /// apply AFTER show: tao may rewrite exstyle when the window is first shown.
 fn reveal_main(window: &WebviewWindow) {
     let _ = window.show();
     apply_noactivate(window);
+    apply_rounded_corners(window);
 }
 
 // ---------------------------------------------------------------------------
