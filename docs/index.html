@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QuotaBar — 桌面上的 AI 额度血条</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif;
+    background: #0d1117; color: rgba(255,255,255,0.92);
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    padding: 48px 20px 64px;
+  }
+  img.logo { width: 96px; height: 96px; border-radius: 22px; }
+  h1 { font-size: 32px; margin: 18px 0 8px; }
+  .tag { color: rgba(255,255,255,0.6); font-size: 15px; max-width: 560px; text-align: center; line-height: 1.7; }
+  .shot { margin: 36px 0 8px; border-radius: 8px; box-shadow: 0 12px 48px rgba(0,0,0,0.6); }
+  .cta { margin-top: 28px; display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .cta a {
+    padding: 12px 26px; border-radius: 8px; font-size: 15px; font-weight: 600;
+    text-decoration: none; color: #0b0d0f; background: #3FB950;
+  }
+  .cta a.ghost { background: transparent; color: rgba(255,255,255,0.85); border: 1px solid rgba(255,255,255,0.2); }
+  .features { margin-top: 44px; max-width: 640px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .f { background: #161b22; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px; }
+  .f b { display: block; margin-bottom: 6px; font-size: 14px; }
+  .f span { font-size: 12.5px; color: rgba(255,255,255,0.6); line-height: 1.6; }
+  .foot { margin-top: 48px; font-size: 12px; color: rgba(255,255,255,0.4); text-align: center; line-height: 1.8; }
+  .foot a { color: #58a6ff; text-decoration: none; }
+  @media (max-width: 640px) { .features { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <img class="logo" src="icon-256.png" alt="QuotaBar logo" />
+  <h1>QuotaBar</h1>
+  <p class="tag">常驻 Windows 桌面的迷你悬浮条，一眼看清 Claude / Kimi / Codex / GLM / Gemini 的额度、5 小时窗口和重置倒计时。<br/>被 429 掐断心流之前，你先看到它。</p>
+
+  <img class="shot" src="screenshot.png" alt="QuotaBar 实际界面" width="296" />
+
+  <div class="cta">
+    <a href="https://github.com/kimhero110/desktoken/releases/latest">下载 Windows 版</a>
+    <a class="ghost" href="https://github.com/kimhero110/desktoken">GitHub</a>
+    <a class="ghost" href="https://gitee.com/xu512/quotabar">Gitee（国内镜像）</a>
+  </div>
+
+  <div class="features">
+    <div class="f"><b>永不抢焦点</b><span>WS_EX_NOACTIVATE 常驻，打字时拖动它光标纹丝不动</span></div>
+    <div class="f"><b>五家同屏</b><span>5h 滚动窗 + 周窗 + 重置倒计时，超阈值整条变色告警</span></div>
+    <div class="f"><b>零遥测</b><span>凭据只读本机 CLI 文件，域名白名单公开可抓包验证</span></div>
+    <div class="f"><b>自定义监视引擎</b><span>任何「GET 返回 JSON」的平台，四个框接入，零代码</span></div>
+    <div class="f"><b>迷你模式</b><span>收成一条细血条，还会讲程序员段子（深夜劝你睡觉）</span></div>
+    <div class="f"><b>7 日趋势</b><span>本地 SQLite 记录用量历史，点开详情看 sparkline</span></div>
+  </div>
+
+  <p class="foot">
+    MIT License · 零遥测 · 凭据不出本机<br/>
+    <a href="https://github.com/kimhero110/desktoken">GitHub</a> ·
+    <a href="https://gitee.com/xu512/quotabar">Gitee</a> ·
+    <a href="https://github.com/kimhero110/desktoken/issues/new/choose">报告问题</a>
+  </p>
+</body>
+</html>

@@ -31,6 +31,12 @@
     border: 1px solid var(--border);
     padding: 8px 10px;
     cursor: move;
+    /* one-shot entrance (no looping animations per design tokens) */
+    animation: bar-in 220ms ease-out;
+  }
+  @keyframes bar-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
   }
   .provider { margin-bottom: 10px; }
   .provider:last-child { margin-bottom: 0; }
@@ -50,7 +56,14 @@
   .pct { width: 32px; text-align: right; font-size: 11px; }
   .cd { width: 44px; text-align: right; font-size: 11px; color: var(--text-dim); margin-left: 6px; }
   .errline { font-size: 10px; color: var(--stale); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .errhint { font-size: 9px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+  .loadingline { font-size: 10px; color: var(--text-dim); margin-top: 4px; }
   .dimmed { opacity: 0.5; }
+  .row.just-reset .fill { animation: flash-green 900ms ease-out; }
+  @keyframes flash-green {
+    0% { box-shadow: 0 0 0 3px rgba(63,185,80,0.65); }
+    100% { box-shadow: 0 0 0 0 rgba(63,185,80,0); }
+  }
   #strip { display: none; height: 22px; line-height: 22px; font-size: 10px; font-weight: 600; color: var(--text); }
   #strip .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin: 0 5px 1px 0; vertical-align: middle; }
   #strip #strip-title { color: var(--text-dim); font-weight: 400; }
@@ -74,13 +87,39 @@
   #empty { padding: 12px 6px; text-align: center; }
   #empty .t1 { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
   #empty .t2 { font-size: 10px; color: var(--text-dim); }
-  body.mini #bar > .provider, body.mini #bar > #empty, body.mini #bar > #notice, body.mini #bar > #updatebar { display: none !important; }
+  body.mini #bar > .provider, body.mini #bar > #empty, body.mini #bar > #notice, body.mini #bar > #updatebar, body.mini #bar > #detail { display: none !important; }
   body.mini #bar { padding: 0 10px; }
   body.mini #strip { display: block; }
+
+  /* ---- detail panel (left-click toggles; Mac menu-bar convention) ---- */
+  #detail {
+    display: none; margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+    animation: detail-in 180ms ease-out;
+  }
+  #detail.open { display: block; }
+  @keyframes detail-in {
+    from { opacity: 0; transform: translateY(-3px); }
+    to { opacity: 1; transform: none; }
+  }
+  .d-provider { margin-bottom: 10px; }
+  .d-provider:last-child { margin-bottom: 0; }
+  .d-head { display: flex; align-items: baseline; font-size: 11px; font-weight: 600; }
+  .d-meta { margin-left: auto; font-size: 9px; font-weight: 400; color: var(--text-dim); }
+  .d-win { font-size: 10px; color: var(--text-dim); margin-top: 3px; line-height: 1.5; }
+  .d-win b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .d-actions { margin-top: 4px; font-size: 10px; }
+  .d-actions a { color: #58a6ff; cursor: pointer; text-decoration: none; margin-right: 10px; }
+  .d-actions a:hover { text-decoration: underline; }
+  .spark { display: block; margin-top: 4px; width: 100%; height: 26px; }
+  .suggest {
+    font-size: 10px; color: var(--yellow); margin-top: 8px; padding-top: 8px;
+    border-top: 1px dashed var(--border); line-height: 1.5;
+  }
 </style>
 </head>
 <body>
-<div id="bar" data-tauri-drag-region>
+<div id="bar">
   <div id="strip"><span class="dot" id="strip-dot"></span><span id="strip-title">QuotaBar</span><span id="strip-worst"></span><span id="strip-msg"></span></div>
   <div id="updatebar"><span class="x" id="up-x">×</span><span id="up-text"></span> <a href="#" id="up-view">查看</a> · <span class="skip" id="up-skip">跳过此版本</span></div>
   <div id="notice"></div>
@@ -89,6 +128,7 @@
     <div class="t2" id="empty-t2">右键 → 设置，添加或启用平台</div>
   </div>
   <div id="providers"></div>
+  <div id="detail"></div>
 </div>
 <script>
   const { invoke } = window.__TAURI__.core;
@@ -96,7 +136,10 @@
   const bar = document.getElementById("bar");
   const providersEl = document.getElementById("providers");
   const emptyEl = document.getElementById("empty");
+  const detailEl = document.getElementById("detail");
   const snapshots = new Map(); // provider_id -> snapshot
+  const prevResets = new Map(); // "id/label" -> last resets_at (for reset flash)
+  const pendingInit = new Set(); // provider ids awaiting their first snapshot
 
   // ---- i18n (system language; backend error text arrives ready-to-show) ----
   const isZh = (navigator.language || '').startsWith('zh');
@@ -112,10 +155,25 @@
       ? `已自动启用 ${names.join(" · ")}，可在设置中关闭`
       : `Auto-enabled: ${names.join(", ")} — disable in Settings`,
     noCred: isZh ? "未检测到 CLI 凭据，右键 → 设置手动添加" : "No CLI credentials detected — right-click → Settings",
+    loading: isZh ? "获取中…" : "Fetching…",
+    used: isZh ? "已用" : "used",
+    remain: isZh ? "剩余" : "left",
+    resetsAt: isZh ? "重置" : "resets",
+    officialPage: isZh ? "官方页面" : "Official page",
+    refreshNow: isZh ? "立即刷新" : "Refresh now",
+    errHint: isZh ? "提示：右键可打开选项菜单" : "Tip: right-click for options",
   };
   document.getElementById("strip-title").textContent = I18N.stripTitle;
   document.getElementById("empty-t1").textContent = I18N.emptyT1;
   document.getElementById("empty-t2").textContent = I18N.emptyT2;
+
+  const OFFICIAL = {
+    kimi: "https://platform.moonshot.cn/console",
+    glm: "https://open.bigmodel.cn/",
+    codex: "https://chatgpt.com/codex",
+    claude: "https://claude.ai/settings/usage",
+    gemini: "https://antigravity.google",
+  };
 
   // ---- formatting helpers (design spec: 43m / 2.1h / 3d4h / — / 等待刷新…) ----
   function fmtCountdown(resetsAt) {
@@ -133,30 +191,76 @@
     if (d < 3600) return Math.round(d / 60) + I18N.minAgo;
     return Math.round(d / 3600) + I18N.hourAgo;
   }
+  function fmtAbsTime(epochSecs) {
+    const dt = new Date(epochSecs * 1000);
+    const today = new Date();
+    const sameDay = dt.toDateString() === today.toDateString();
+    const hm = `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+    if (sameDay) return (isZh ? "今天 " : "today ") + hm;
+    return `${dt.getMonth() + 1}/${dt.getDate()} ${hm}`;
+  }
   function isStale(fetchedAt) {
-    return Date.now() / 1000 - fetchedAt > 600; // mild stale tier
+    return Date.now() / 1000 - fetchedAt > 600;
   }
   function fillClass(pct) { return pct >= 90 ? "fill danger" : pct >= 70 ? "fill warn" : "fill"; }
   function esc(t) { const d = document.createElement("div"); d.textContent = String(t); return d.innerHTML; }
 
+  // ---- ≥90% actionable suggestion (design spec: point at the roomy sibling) ----
+  function suggestion() {
+    let tight = null;
+    let roomy = null;
+    for (const s of snapshots.values()) {
+      if (s.error) continue;
+      for (const w of s.windows) {
+        if (w.used_percent >= 90 && (!tight || w.used_percent > tight.w.used_percent)) tight = { s, w };
+        if ((w.label === "周" || w.label === "滚动") && w.used_percent < 70 && (!roomy || w.used_percent < roomy.w.used_percent)) roomy = { s, w };
+      }
+    }
+    if (tight && roomy && tight.s.provider_id !== roomy.s.provider_id) {
+      return isZh
+        ? `${tight.s.provider_name} ${tight.w.label} 已 ${Math.round(tight.w.used_percent)}%——${roomy.s.provider_name} ${roomy.w.label} 仅用 ${Math.round(roomy.w.used_percent)}%，先去那边写`
+        : `${tight.s.provider_name} ${tight.w.label} at ${Math.round(tight.w.used_percent)}% — ${roomy.s.provider_name} is only ${Math.round(roomy.w.used_percent)}%`;
+    }
+    return null;
+  }
+
   // ---- renderer ----
   function render() {
     providersEl.innerHTML = "";
-    emptyEl.style.display = snapshots.size === 0 ? "" : "none";
+    emptyEl.style.display = (snapshots.size === 0 && pendingInit.size === 0) ? "" : "none";
+    // loading placeholders for providers that haven't answered yet
+    for (const pid of pendingInit) {
+      if (snapshots.has(pid)) continue;
+      const div = document.createElement("div");
+      div.className = "provider";
+      div.innerHTML = `<div class="header"><span class="dot stale"></span>${esc(pid)}<span class="freshness"></span></div><div class="loadingline">${I18N.loading}</div>`;
+      providersEl.appendChild(div);
+    }
     let worst = 0;
+    let errHintShown = false;
+    try { errHintShown = localStorage.getItem("err-hint-shown") === "1"; } catch (e) {}
     for (const [id, s] of snapshots) {
       const div = document.createElement("div");
       div.className = "provider";
       const stale = isStale(s.fetched_at);
       let html = `<div class="header"><span class="dot${stale || s.error ? " stale" : ""}"></span>${esc(s.provider_name)}<span class="freshness">${fmtFresh(s.fetched_at, !!s.error)}</span></div>`;
       if (s.error && s.windows.length === 0) {
-        // backend ProviderError text is final (design spec error mapping table)
         html += `<div class="errline">${esc(s.error)}</div>`;
+        if (!errHintShown) {
+          html += `<div class="errhint">${I18N.errHint}</div>`;
+          try { localStorage.setItem("err-hint-shown", "1"); } catch (e) {}
+          errHintShown = true;
+        }
       }
       for (const w of s.windows) {
         worst = Math.max(worst, w.used_percent);
         const dim = stale ? " dimmed" : "";
-        html += `<div class="row${dim}" title="${esc(s.provider_name)} · ${esc(w.label)} 窗口&#10;已用 ${Math.round(w.used_percent)}%&#10;来源: ${s.source === "official" ? "官方接口" : s.source === "manual_key" ? "手动 key" : "响应头估算"}${s.plan ? " · " + esc(s.plan) : ""}">
+        // reset flash: resets_at jumped forward => a new cycle began
+        const key = id + "/" + w.label;
+        const prev = prevResets.get(key);
+        const justReset = prev && w.resets_at && w.resets_at > prev && w.resets_at > Date.now() / 1000 - 300;
+        prevResets.set(key, w.resets_at);
+        html += `<div class="row${dim}${justReset ? " just-reset" : ""}" title="${esc(s.provider_name)} · ${esc(w.label)} 窗口&#10;已用 ${Math.round(w.used_percent)}%&#10;来源: ${s.source === "official" ? "官方接口" : s.source === "manual_key" ? "手动 key" : "响应头估算"}${s.plan ? " · " + esc(s.plan) : ""}">
           <span class="label">${esc(w.label)}</span>
           <div class="bar"><div class="${fillClass(w.used_percent)}" style="width:${w.used_percent.toFixed(1)}%"></div></div>
           <span class="pct">${Math.round(w.used_percent)}%</span>
@@ -172,7 +276,6 @@
     const worstColor = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "#3FB950";
     dot.style.background = worstColor;
     bar.style.borderColor = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "rgba(255,255,255,0.08)";
-    // mini strip: glanceable worst metric
     const sw = document.getElementById("strip-worst");
     if (snapshots.size > 0) {
       sw.textContent = Math.round(worst) + "%";
@@ -180,10 +283,96 @@
     } else {
       sw.textContent = "";
     }
+    renderDetail();
     refit();
   }
 
-  // ---- mini strip: programmer memes + time-based care (rotates each tick) ----
+  // ---- detail panel (click to toggle; Mac menu-bar convention) ----
+  let detailOpen = false;
+  const historyCache = new Map(); // provider_id -> {label: [(ts,pct)]}
+
+  function renderDetail() {
+    if (!detailOpen) { detailEl.classList.remove("open"); detailEl.innerHTML = ""; return; }
+    let html = "";
+    for (const [id, s] of snapshots) {
+      if (s.error && s.windows.length === 0) continue;
+      const meta = [s.plan, s.source === "official" ? "官方接口" : s.source === "manual_key" ? "手动 key" : "估算"]
+        .filter(Boolean).join(" · ");
+      html += `<div class="d-provider"><div class="d-head">${esc(s.provider_name)}<span class="d-meta">${esc(meta)}</span></div>`;
+      for (const w of s.windows) {
+        const remain = Math.max(0, 100 - w.used_percent);
+        html += `<div class="d-win">${esc(w.label)}：${I18N.used} <b>${Math.round(w.used_percent)}%</b>（${I18N.remain} ${Math.round(remain)}%）${w.resets_at ? ` · ${I18N.resetsAt} ${fmtAbsTime(w.resets_at)}` : ""}</div>`;
+        const hist = historyCache.get(id + "/" + w.label);
+        if (hist && hist.length > 2) {
+          html += `<canvas class="spark" data-series="${id}/${w.label}" width="260" height="26"></canvas>`;
+        }
+      }
+      const link = OFFICIAL[id];
+      html += `<div class="d-actions">${link ? `<a data-url="${link}">${I18N.officialPage}</a>` : ""}<a data-refresh="1">${I18N.refreshNow}</a></div></div>`;
+    }
+    const sug = suggestion();
+    if (sug) html += `<div class="suggest">${esc(sug)}</div>`;
+    detailEl.innerHTML = html;
+    detailEl.classList.add("open");
+    detailEl.querySelectorAll("a[data-url]").forEach(a =>
+      a.addEventListener("click", () => invoke("open_url", { url: a.dataset.url })));
+    detailEl.querySelectorAll("a[data-refresh]").forEach(a =>
+      a.addEventListener("click", () => invoke("refresh_now_cmd")));
+    detailEl.querySelectorAll("canvas.spark").forEach(drawSpark);
+  }
+
+  function drawSpark(canvas) {
+    const hist = historyCache.get(canvas.dataset.series);
+    if (!hist || hist.length < 3) return;
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    const t0 = hist[0][0], t1 = hist[hist.length - 1][0];
+    const span = Math.max(1, t1 - t0);
+    // track
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, H - 1); ctx.lineTo(W, H - 1); ctx.stroke();
+    // area fill
+    ctx.beginPath();
+    hist.forEach(([t, p], i) => {
+      const x = (t - t0) / span * W;
+      const y = H - 3 - (Math.min(100, Math.max(0, p)) / 100) * (H - 6);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    const lastPct = hist[hist.length - 1][1];
+    const col = lastPct >= 90 ? "#F85149" : lastPct >= 70 ? "#D29922" : "#3FB950";
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fillStyle = col + "22"; ctx.fill();
+  }
+
+  function toggleDetail() {
+    detailOpen = !detailOpen;
+    if (detailOpen) {
+      // pull history for sparklines, then render
+      const ids = Array.from(snapshots.keys());
+      Promise.all(ids.map(id => invoke("get_history", { providerId: id }).then(h => {
+        for (const [label, series] of Object.entries(h)) historyCache.set(id + "/" + label, series);
+      }).catch(() => {}))).then(renderDetail);
+    }
+    renderDetail();
+    refit();
+  }
+
+  // ---- layout ownership (frontend owns height; kills the dead zone) ----
+  function refit() {
+    const mini = document.body.classList.contains("mini");
+    if (mini) {
+      document.getElementById("strip-msg").textContent = stripMessage();
+      const w = Math.min(360, Math.max(140, document.getElementById("strip").scrollWidth + 22));
+      invoke("autosize", { height: 22, width: w });
+    } else {
+      invoke("autosize", { height: bar.offsetHeight, width: null });
+    }
+  }
+  window.addEventListener("load", refit);
+
+  // ---- mini strip: quota-aware messages (memes yield to advice when tight) ----
   const MEMES = [
     "它在我机器上是好的", "先重启试试", "这不是 bug，是 feature", "编译中 ≈ 带薪休假",
     "改一个 bug，冒出俩", "TODO: 以后再优化", "生产环境才是测试环境",
@@ -192,6 +381,8 @@
     "代码能跑就别动", "写注释是给自己留情面",
   ];
   function stripMessage() {
+    const sug = suggestion();
+    if (sug) return sug; // ≥90%: the joke yields to routing advice
     const now = new Date();
     const h = now.getHours();
     const d = now.getDay();
@@ -204,24 +395,17 @@
     return MEMES[Math.floor(Date.now() / 30000) % MEMES.length];
   }
 
-  // ---- layout ownership (frontend owns height; kills the dead zone) ----
-  function refit() {
-    const mini = document.body.classList.contains("mini");
-    if (mini) {
-      document.getElementById("strip-msg").textContent = stripMessage();
-      // width hugs the strip content (no dead space on the right)
-      const w = Math.min(360, Math.max(140, document.getElementById("strip").scrollWidth + 22));
-      invoke("autosize", { height: 22, width: w });
-    } else {
-      invoke("autosize", { height: bar.offsetHeight, width: null });
-    }
-  }
-  window.addEventListener("load", refit);
-
   // ---- events ----
   listen("quota://snapshot", (ev) => {
     const s = ev.payload;
+    pendingInit.delete(s.provider_id);
     snapshots.set(s.provider_id, s);
+    render();
+  });
+  listen("providers-init", (ev) => {
+    for (const p of ev.payload || []) {
+      if (!snapshots.has(p.id)) pendingInit.add(p.id);
+    }
     render();
   });
   listen("mini-mode", (ev) => {
@@ -232,7 +416,6 @@
   listen("settings-changed", (ev) => {
     bar.style.background = `rgba(18, 18, 22, ${ev.payload.opacity})`;
   });
-  // E4: first-run auto-enable notification (3s temporary strip)
   listen("tos-accepted", (ev) => {
     const names = ev.payload || [];
     const el = document.getElementById("notice");
@@ -241,12 +424,10 @@
     refit();
     setTimeout(() => { el.style.display = "none"; refit(); }, 3000);
   });
-  // E5: border flash on alert toast
   listen("alert-flash", () => {
     bar.classList.add("flash");
     setTimeout(() => bar.classList.remove("flash"), 400);
   });
-  // E1: update banner (查看 / 跳过此版本 / ×)
   listen("update-available", (ev) => {
     const info = ev.payload;
     const ub = document.getElementById("updatebar");
@@ -275,8 +456,27 @@
   // countdown + freshness refresh every 30s (design: no per-second jumps)
   setInterval(render, 30000);
 
-  // ---- drag & menu (NOACTIVATE-proof manual drag lives in Rust) ----
-  bar.addEventListener("mousedown", (e) => { if (e.button === 0) invoke("begin_drag"); });
+  // ---- drag & click-to-detail & menu ----
+  // Pure-JS click vs drag detection; only an actual drag calls begin_drag.
+  let downAt = null;
+  bar.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    downAt = { x: e.screenX, y: e.screenY, t: Date.now(), dragging: false };
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!downAt || downAt.dragging) return;
+    if (Math.hypot(e.screenX - downAt.x, e.screenY - downAt.y) > 4) {
+      downAt.dragging = true;
+      invoke("begin_drag");
+    }
+  });
+  window.addEventListener("mouseup", (e) => {
+    if (e.button !== 0 || !downAt) return;
+    const wasDrag = downAt.dragging;
+    const dt = Date.now() - downAt.t;
+    downAt = null;
+    if (!wasDrag && dt < 500) toggleDetail();
+  });
   bar.addEventListener("contextmenu", (e) => { e.preventDefault(); invoke("context_menu"); });
 
   // ---- init ----

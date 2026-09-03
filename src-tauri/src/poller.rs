@@ -165,6 +165,7 @@ fn spawn_provider<F, Fut>(
                         .ok()
                         .and_then(|m| m.get(&id).cloned());
                     evaluate_alerts(&app, prev, &snap);
+                    crate::history::record(&snap); // E8: 7-day local history
                     if let Ok(mut m) = last().lock() {
                         m.insert(id.clone(), snap.clone());
                     }
@@ -199,6 +200,19 @@ pub fn start(app: AppHandle) {
     let enabled = |id: &str| {
         s.enabled_providers.is_empty() || s.enabled_providers.iter().any(|p| p == id)
     };
+
+    // tell the frontend which providers are coming so it can render
+    // per-provider loading placeholders (design spec: 加载态)
+    let mut init: Vec<(&str, &str)> = vec![];
+    if enabled("kimi") { init.push(("kimi", "Kimi")); }
+    if enabled("glm") { init.push(("glm", "GLM")); }
+    if enabled("codex") { init.push(("codex", "Codex")); }
+    if enabled("claude") { init.push(("claude", "Claude")); }
+    if enabled("gemini") { init.push(("gemini", "Gemini")); }
+    for def in &s.custom_providers {
+        init.push((def.id.as_str(), def.name.as_str()));
+    }
+    let _ = app.emit("providers-init", init.iter().map(|(i, n)| serde_json::json!({"id": i, "name": n})).collect::<Vec<_>>());
 
     if enabled("kimi") {
         spawn_provider(app.clone(), "kimi".into(), "Kimi".into(), 120, || run_kimi());

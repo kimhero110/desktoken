@@ -104,6 +104,10 @@
   <div class="verify-result" id="cp-result"></div>
 </div>
 
+<div class="note" style="margin-top:24px; text-align:center; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px;">
+  QuotaBar <span id="ver"></span> · <a href="#" id="check-upd" style="color:#58a6ff; text-decoration:none;">检查更新</a>
+</div>
+
 <script>
   const { invoke } = window.__TAURI__.core;
   const $ = (id) => document.getElementById(id);
@@ -230,6 +234,17 @@
   invoke("get_settings").then((s) => {
     op.value = s.opacity; wsel.value = String(s.width); ct.checked = s.mini_mode; showOp();
     $("autostart").checked = !!s.autostart;
+  });
+  invoke("current_version").then(v => { $("ver").textContent = "v" + v; });
+  $("check-upd").addEventListener("click", async (e) => {
+    e.preventDefault();
+    const el = $("check-upd");
+    el.textContent = "检查中…";
+    try {
+      await invoke("check_update_cmd");
+      el.textContent = "已触发检查（有新版会在悬浮条顶部提示）";
+    } catch (err) { el.textContent = "检查失败"; }
+    setTimeout(() => { el.textContent = "检查更新"; }, 4000);
   });
   $("autostart").addEventListener("change", () => invoke("set_autostart", { enabled: $("autostart").checked }));
   loadProviders();

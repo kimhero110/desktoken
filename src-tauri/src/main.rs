@@ -21,6 +21,7 @@ mod settings;
 mod credentials;
 mod diagnostics;
 mod fetch;
+mod history;
 mod oauth;
 mod poller;
 mod providers;
@@ -187,7 +188,8 @@ fn tray_icon_image_colored(r: u8, g: u8, b: u8) -> tauri::image::Image<'static> 
 }
 
 pub(crate) fn tray_icon_image() -> tauri::image::Image<'static> {
-    tray_icon_image_colored(0x3F, 0xB9, 0x50) // #3FB950 per design tokens
+    // the real QuotaBar logo, raw RGBA (icons/tray.rgba, 32x32, made by PIL)
+    tauri::image::Image::new_owned(include_bytes!("../icons/tray.rgba").to_vec(), 32, 32)
 }
 
 pub(crate) fn tray_icon_image_alert() -> tauri::image::Image<'static> {
@@ -396,14 +398,41 @@ fn copy_diagnostics(app: tauri::AppHandle) -> Result<(), String> {
     app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
 
+/// Detail card "立即刷新" — same 30s cooldown as the menu item.
+#[tauri::command]
+fn refresh_now_cmd() -> bool {
+    trigger_refresh()
+}
+
+/// Settings window "检查更新".
+#[tauri::command]
+fn check_update_cmd(app: tauri::AppHandle) {
+    updater_check::maybe_check(app, true);
+}
+
 #[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    // allowlist: only our own release/issue pages
-    if !url.starts_with("https://github.com/kimhero110/desktoken") {
+    // allowlist: our repo pages + official provider consoles (detail card links)
+    const ALLOWED: &[&str] = &[
+        "https://github.com/kimhero110/desktoken",
+        "https://platform.moonshot.cn",
+        "https://open.bigmodel.cn",
+        "https://chatgpt.com",
+        "https://claude.ai",
+        "https://antigravity.google",
+    ];
+    if !ALLOWED.iter().any(|p| url.starts_with(p)) {
         return Err("不允许的链接".into());
     }
     app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// E8: 7-day usage history for the detail card sparklines.
+/// Returns { label: [(ts, used_pct)] } oldest-first.
+#[tauri::command]
+fn get_history(provider_id: String) -> std::collections::BTreeMap<String, Vec<(i64, f64)>> {
+    history::provider_history(&provider_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +719,10 @@ fn main() {
             verify_provider,
             set_autostart,
             copy_diagnostics,
+            refresh_now_cmd,
+            check_update_cmd,
             open_url,
+            get_history,
             updater_check::skip_version,
             updater_check::current_version,
         ])
