@@ -48,8 +48,10 @@
   .cd { width: 44px; text-align: right; font-size: 11px; color: var(--text-dim); margin-left: 6px; }
   .errline { font-size: 10px; color: var(--stale); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .dimmed { opacity: 0.5; }
-  #strip { display: none; height: 24px; line-height: 24px; font-size: 11px; font-weight: 600; color: var(--text); }
-  #strip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin: 0 6px 1px 0; vertical-align: middle; }
+  #strip { display: none; height: 20px; line-height: 20px; font-size: 10px; font-weight: 600; color: var(--text); }
+  #strip .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin: 0 5px 1px 0; vertical-align: middle; }
+  #strip #strip-title { color: var(--text-dim); font-weight: 400; }
+  #strip #strip-worst { font-variant-numeric: tabular-nums; margin-left: 5px; }
   #notice {
     display: none; font-size: 10px; color: var(--text-dim); line-height: 1.5;
     padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--border);
@@ -66,13 +68,18 @@
   #empty .t1 { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
   #empty .t2 { font-size: 10px; color: var(--text-dim); }
   body.mini #bar > .provider, body.mini #bar > #empty, body.mini #bar > #notice, body.mini #bar > #updatebar { display: none !important; }
-  body.mini #bar { padding: 0 10px; }
+  body.mini #bar {
+    padding: 0 10px;
+    /* crystal strip: let the acrylic breathe through (!important wins over
+       the inline opacity style from settings) */
+    background: rgba(18, 18, 22, 0.45) !important;
+  }
   body.mini #strip { display: block; }
 </style>
 </head>
 <body>
 <div id="bar" data-tauri-drag-region>
-  <div id="strip"><span class="dot" id="strip-dot"></span><span id="strip-title">QuotaBar</span></div>
+  <div id="strip"><span class="dot" id="strip-dot"></span><span id="strip-title">QuotaBar</span><span id="strip-worst"></span></div>
   <div id="updatebar"><span class="x" id="up-x">×</span><span id="up-text"></span> <a href="#" id="up-view">查看</a> · <span class="skip" id="up-skip">跳过此版本</span></div>
   <div id="notice"></div>
   <div id="empty">
@@ -160,15 +167,24 @@
     }
     // strip status dot + ambient border alert follow worst window (design spec)
     const dot = document.getElementById("strip-dot");
-    dot.style.background = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "#3FB950";
+    const worstColor = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "#3FB950";
+    dot.style.background = worstColor;
     bar.style.borderColor = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "rgba(255,255,255,0.08)";
+    // mini strip: glanceable worst metric
+    const sw = document.getElementById("strip-worst");
+    if (snapshots.size > 0) {
+      sw.textContent = Math.round(worst) + "%";
+      sw.style.color = worstColor;
+    } else {
+      sw.textContent = "";
+    }
     refit();
   }
 
   // ---- layout ownership (frontend owns height; kills the dead zone) ----
   function refit() {
     const mini = document.body.classList.contains("mini");
-    invoke("autosize", { height: mini ? 26 : bar.offsetHeight });
+    invoke("autosize", { height: mini ? 20 : bar.offsetHeight });
   }
   window.addEventListener("load", refit);
 

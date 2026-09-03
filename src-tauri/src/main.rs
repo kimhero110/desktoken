@@ -90,15 +90,18 @@ fn apply_noactivate(window: &WebviewWindow) {
 #[cfg(not(target_os = "windows"))]
 fn apply_noactivate(_window: &WebviewWindow) {}
 
-/// Round the OS window corners (DWM, Windows 11+). The bar itself is rounded
-/// (10px), but without this the square window corners show through as gray
-/// acrylic triangles. Falls back silently on Win10.
+/// Round the OS window corners. Tried DWMWA_WINDOW_CORNER_PREFERENCE first
+/// (Win11); on Windows Server / Win10 DWM ignores it silently, so we always
+/// also clip with a round-rect window region — the gray acrylic triangles at
+/// the corners are physically cut away. Region must be re-applied on resize
+/// (called from autosize).
 #[cfg(target_os = "windows")]
 fn apply_rounded_corners(window: &WebviewWindow) {
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
     };
+    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
     if let Ok(hwnd) = window.hwnd() {
         let raw: HWND = hwnd.0 as HWND;
         let pref = DWMWCP_ROUND;
@@ -109,6 +112,13 @@ fn apply_rounded_corners(window: &WebviewWindow) {
                 &pref as *const _ as *const _,
                 std::mem::size_of_val(&pref) as u32,
             );
+            if let Ok(size) = window.outer_size() {
+                let (w, h) = (size.width as i32, size.height as i32);
+                let r = (10.0 * window.scale_factor().unwrap_or(1.0)).round() as i32;
+                let rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2);
+                // SetWindowRgn takes ownership of the region handle
+                SetWindowRgn(raw, rgn, 1);
+            }
         }
     }
 }
@@ -508,6 +518,8 @@ fn autosize(window: WebviewWindow, height: f64) {
     let phys = tauri::PhysicalSize::new((s.width * sf).round() as u32, (h * sf).round() as u32);
     rustlog(format!("autosize: req={} -> phys {:?}", height, phys));
     let _ = window.set_size(phys);
+    // round-rect clip must follow the new size (corners otherwise regrow gray)
+    apply_rounded_corners(&window);
 }
 
 // ---------------------------------------------------------------------------
