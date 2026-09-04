@@ -81,49 +81,48 @@ fn evaluate_alerts(app: &AppHandle, prev: Option<QuotaSnapshot>, snap: &QuotaSna
     if snap.error.is_some() {
         return;
     }
-    let mut s = settings::load();
-    let mut dirty = false;
+    let mut fired = false;
     let now = providers::now_secs();
 
-    for w in &snap.windows {
-        let key = format!("{}/{}", snap.provider_id, w.label);
+    settings::edit(|s| {
+        for w in &snap.windows {
+            let key = format!("{}/{}", snap.provider_id, w.label);
 
-        // hysteresis re-arm: usage fell below 85%
-        if w.used_percent < 85.0 && s.toast_alerted.remove(&key).is_some() {
-            dirty = true;
-        }
-        // >=90% crossing: one toast per reset cycle
-        if w.used_percent >= 90.0 {
-            let cycle = w.resets_at.unwrap_or(0);
-            if s.toast_alerted.get(&key) != Some(&cycle) {
-                toast(
-                    app,
-                    &format!(
-                        "{} {} 窗口已用 {}%（{}）",
-                        snap.provider_name,
-                        w.label,
-                        w.used_percent.round() as i64,
-                        "接近用尽"
-                    ),
-                );
-                s.toast_alerted.insert(key, cycle);
-                dirty = true;
+            // hysteresis re-arm: usage fell below 85%
+            if w.used_percent < 85.0 && s.toast_alerted.remove(&key).is_some() {
+                fired = true;
             }
-        }
-        // reset moment: previous cycle's resets_at passed, new cycle began
-        if let Some(p) = &prev {
-            if let Some(pw) = p.windows.iter().find(|pw| pw.label == w.label) {
-                if let (Some(pt), Some(nt)) = (pw.resets_at, w.resets_at) {
-                    if pt <= now && nt > pt && w.used_percent < pw.used_percent {
-                        toast(app, &format!("{} {} 已重置，放开用", snap.provider_name, w.label));
+            // >=90% crossing: one toast per reset cycle
+            if w.used_percent >= 90.0 {
+                let cycle = w.resets_at.unwrap_or(0);
+                if s.toast_alerted.get(&key) != Some(&cycle) {
+                    toast(
+                        app,
+                        &format!(
+                            "{} {} 窗口已用 {}%（{}）",
+                            snap.provider_name,
+                            w.label,
+                            w.used_percent.round() as i64,
+                            "接近用尽"
+                        ),
+                    );
+                    s.toast_alerted.insert(key, cycle);
+                    fired = true;
+                }
+            }
+            // reset moment: previous cycle's resets_at passed, new cycle began
+            if let Some(p) = &prev {
+                if let Some(pw) = p.windows.iter().find(|pw| pw.label == w.label) {
+                    if let (Some(pt), Some(nt)) = (pw.resets_at, w.resets_at) {
+                        if pt <= now && nt > pt && w.used_percent < pw.used_percent {
+                            toast(app, &format!("{} {} 已重置，放开用", snap.provider_name, w.label));
+                        }
                     }
                 }
             }
         }
-    }
-    if dirty {
-        let _ = settings::save(&s);
-    }
+    });
+    let _ = fired;
 }
 
 fn spawn_provider<F, Fut>(

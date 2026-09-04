@@ -148,7 +148,12 @@ pub fn load() -> Settings {
 
 /// Atomic write: temp file + rename, retry 6× with 100ms×2^n backoff
 /// (Windows: target held by another process → ERROR_ACCESS_DENIED).
+/// All writes serialize through a process-wide lock — concurrent writers
+/// (poller toast dedup vs UI toggles) used to last-write-win and lose edits.
+static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn save(s: &Settings) -> std::io::Result<()> {
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let path = settings_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -169,4 +174,15 @@ pub fn save(s: &Settings) -> std::io::Result<()> {
         }
     }
     Err(last_err.unwrap())
+}
+
+/// Read-modify-write under the write lock: the only safe way to edit settings
+/// from concurrent contexts (poller tasks, UI commands).
+pub fn edit<R>(f: impl FnOnce(&mut Settings) -> R) -> R {
+    // serialize read→edit→save as one unit
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = load();
+    let r = f(&mut s);
+    let _ = save(&s);
+    r
 }

@@ -197,13 +197,13 @@ pub fn detect() -> Vec<ProviderCredInfo> {
 pub fn manual_key_target(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
     match id {
         // Kimi Code console API key — Bearer
-        ("kimi") => Some((
+        "kimi" => Some((
             "https://api.kimi.com/coding/v1/usages",
             "Authorization",
             "Bearer ",
         )),
         // GLM Coding Plan — raw key, no Bearer prefix (per Zhipu official plugin)
-        ("glm") => Some((
+        "glm" => Some((
             "https://open.bigmodel.cn/api/monitor/usage/quota/limit",
             "Authorization",
             "",

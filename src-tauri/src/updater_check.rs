@@ -93,25 +93,26 @@ pub async fn check_now() -> Option<UpdateInfo> {
 /// never errors out loud (silent failure per spec).
 pub fn maybe_check(app: tauri::AppHandle, force: bool) {
     tauri::async_runtime::spawn(async move {
-        let mut s = settings::load();
         let now = crate::providers::now_secs();
+        let s = settings::load();
         let fresh_cache = s
             .update_checked_at
             .map(|t| now - t < 24 * 3600)
             .unwrap_or(false);
-        let info = if fresh_cache && !force {
+        let info: Option<UpdateInfo> = if fresh_cache && !force {
             s.latest_version.clone().map(|v| UpdateInfo {
-                version: v.clone(),
-                url: format!(
-                    "https://github.com/kimhero110/desktoken/releases/tag/v{}",
-                    v
-                ),
+                url: format!("https://github.com/kimhero110/desktoken/releases/tag/v{}", v),
+                version: v,
             })
         } else {
+            // network OUTSIDE the settings lock
             let r = check_now().await;
-            s.update_checked_at = Some(now);
-            s.latest_version = r.as_ref().map(|i| i.version.clone());
-            let _ = settings::save(&s);
+            settings::edit(|s| {
+                s.update_checked_at = Some(now);
+                if let Some(ref r) = r {
+                    s.latest_version = Some(r.version.clone());
+                }
+            });
             r
         };
         if let Some(i) = info {
@@ -126,9 +127,7 @@ pub fn maybe_check(app: tauri::AppHandle, force: bool) {
 
 #[tauri::command]
 pub fn skip_version(version: String) {
-    let mut s = settings::load();
-    s.skipped_version = Some(version);
-    let _ = settings::save(&s);
+    crate::settings::edit(|s| s.skipped_version = Some(version));
 }
 
 #[tauri::command]

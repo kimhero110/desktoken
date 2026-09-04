@@ -241,10 +241,11 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
         "settings" => open_settings_window(app),
         "mini_mode" => {
             if let Some(w) = app.get_webview_window("main") {
-                let mut s = settings::load();
-                s.mini_mode = !s.mini_mode;
-                let _ = settings::save(&s);
-                set_mini_mode(&w, s.mini_mode);
+                let now_mini = settings::edit(|s| {
+                    s.mini_mode = !s.mini_mode;
+                    s.mini_mode
+                });
+                set_mini_mode(&w, now_mini);
             }
         }
         "refresh" => {
@@ -316,9 +317,7 @@ fn open_tos_window(app: &tauri::AppHandle) {
 
 #[tauri::command]
 fn accept_tos(app: tauri::AppHandle) -> Result<(), String> {
-    let mut s = settings::load();
-    s.tos_accepted = true;
-    settings::save(&s).map_err(|e| e.to_string())?;
+    settings::edit(|s| s.tos_accepted = true);
     // E4 magical moment: auto-discovered providers are enabled by default
     // (empty enabled_providers = all), fetch immediately, notify 3s.
     let names: Vec<String> = credentials::discover_instances()
@@ -454,15 +453,16 @@ fn begin_drag(window: WebviewWindow) {
         // persist position at drag end
         if let Ok(pos) = window.outer_position() {
             let sf = window.scale_factor().unwrap_or(1.0);
-            let mut s = settings::load();
-            s.window_x = Some(pos.x as f64 / sf);
-            s.window_y = Some(pos.y as f64 / sf);
-            s.monitor_name = window
+            let monitor = window
                 .current_monitor()
                 .ok()
                 .flatten()
                 .and_then(|m| m.name().cloned());
-            let _ = settings::save(&s);
+            settings::edit(|s| {
+                s.window_x = Some(pos.x as f64 / sf);
+                s.window_y = Some(pos.y as f64 / sf);
+                s.monitor_name = monitor;
+            });
         }
     });
 }
@@ -501,10 +501,30 @@ pub(crate) fn rustlog(msg: String) {
     let safe = diagnostics::redact(&msg);
     let dir = settings::app_data_dir();
     let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("spike.log");
+    // size-capped rolling: truncate to the tail half when over 2 MB so a
+    // resident app can't grow the log unbounded
+    const MAX_LOG: u64 = 2 * 1024 * 1024;
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > MAX_LOG {
+            if let Ok(raw) = std::fs::read_to_string(&path) {
+                let keep: String = raw
+                    .lines()
+                    .rev()
+                    .take(2000)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let _ = std::fs::write(&path, keep + "\n");
+            }
+        }
+    }
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join("spike.log"))
+        .open(&path)
         .map(|mut f| {
             use std::io::Write;
             let _ = writeln!(f, "{}", safe);
@@ -551,11 +571,12 @@ fn apply_appearance(
     width: f64,
     mini_mode: bool,
 ) -> Result<(), String> {
-    let mut s = settings::load();
-    s.opacity = opacity.clamp(0.6, 1.0);
-    s.width = width.clamp(240.0, 360.0);
-    s.mini_mode = mini_mode;
-    settings::save(&s).map_err(|e| e.to_string())?;
+    settings::edit(|s| {
+        s.opacity = opacity.clamp(0.6, 1.0);
+        s.width = width.clamp(240.0, 360.0);
+        s.mini_mode = mini_mode;
+    });
+    let s = settings::load(); // for the emit payload below
     if let Some(w) = app.get_webview_window("main") {
         if !mini_mode {
             let _ = w.set_size(tauri::PhysicalSize::new(
@@ -587,13 +608,13 @@ fn list_instances() -> Vec<credentials::InstanceDesc> {
 /// Per-instance toggle: off-list in settings.disabled_instances.
 #[tauri::command]
 fn set_instance_enabled(app: tauri::AppHandle, id: String, enabled: bool) -> Result<(), String> {
-    let mut s = settings::load();
-    if enabled {
-        s.disabled_instances.retain(|x| x != &id);
-    } else if !s.disabled_instances.contains(&id) {
-        s.disabled_instances.push(id);
-    }
-    settings::save(&s).map_err(|e| e.to_string())?;
+    settings::edit(|s| {
+        if enabled {
+            s.disabled_instances.retain(|x| x != &id);
+        } else if !s.disabled_instances.contains(&id) {
+            s.disabled_instances.push(id.clone());
+        }
+    });
     poller::sync(app); // hot reload: row appears/disappears immediately
     Ok(())
 }
@@ -614,15 +635,15 @@ fn delete_manual_key(provider_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn set_provider_enabled(app: tauri::AppHandle, provider_id: String, enabled: bool) -> Result<(), String> {
-    let mut s = settings::load();
-    if enabled && !s.enabled_providers.contains(&provider_id) {
-        s.enabled_providers.push(provider_id);
-    } else if !enabled {
-        s.enabled_providers.retain(|p| p != &provider_id);
-    }
-    // explicit user action: from now on an empty list means "nothing on"
-    s.providers_configured = true;
-    settings::save(&s).map_err(|e| e.to_string())?;
+    settings::edit(|s| {
+        if enabled && !s.enabled_providers.contains(&provider_id) {
+            s.enabled_providers.push(provider_id.clone());
+        } else if !enabled {
+            s.enabled_providers.retain(|p| p != &provider_id);
+        }
+        // explicit user action: from now on an empty list means "nothing on"
+        s.providers_configured = true;
+    });
     poller::sync(app); // hot reload
     Ok(())
 }
@@ -826,15 +847,16 @@ fn main() {
                 }
                 if let Ok(pos) = window.outer_position() {
                     let sf = window.scale_factor().unwrap_or(1.0);
-                    let mut s = settings::load();
-                    s.window_x = Some(pos.x as f64 / sf);
-                    s.window_y = Some(pos.y as f64 / sf);
-                    s.monitor_name = window
+                    let monitor = window
                         .current_monitor()
                         .ok()
                         .flatten()
                         .and_then(|m| m.name().cloned());
-                    let _ = settings::save(&s);
+                    settings::edit(|s| {
+                        s.window_x = Some(pos.x as f64 / sf);
+                        s.window_y = Some(pos.y as f64 / sf);
+                        s.monitor_name = monitor;
+                    });
                 }
             }
         })

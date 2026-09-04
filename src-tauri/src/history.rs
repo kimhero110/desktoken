@@ -48,24 +48,6 @@ pub fn record(snap: &QuotaSnapshot) {
     let _ = conn.execute("DELETE FROM samples WHERE ts < ?1", [cutoff]);
 }
 
-/// 7-day series for one provider+window, oldest first: [(ts, used_pct)].
-pub fn series(provider: &str, label: &str) -> Vec<(i64, f64)> {
-    let Ok(conn) = db().lock() else { return vec![] };
-    let cutoff = crate::providers::now_secs() - 7 * 86400;
-    let mut stmt = match conn.prepare(
-        "SELECT ts, used_pct FROM samples
-         WHERE provider = ?1 AND label = ?2 AND ts >= ?3 ORDER BY ts",
-    ) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    stmt.query_map(rusqlite::params![provider, label, cutoff], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
-    })
-    .map(|rows| rows.flatten().collect())
-    .unwrap_or_default()
-}
-
 /// All window series for one provider: { label: [(ts, pct)] }.
 pub fn provider_history(provider: &str) -> std::collections::BTreeMap<String, Vec<(i64, f64)>> {
     let mut out = std::collections::BTreeMap::new();
@@ -118,12 +100,11 @@ mod tests {
         let id = format!("test-{}", crate::providers::now_secs());
         record(&snap_for(&id, 12.0));
         record(&snap_for(&id, 34.0));
-        let s = series(&id, "5h");
+        let h = provider_history(&id);
+        let s = h.get("5h").expect("5h series");
         assert_eq!(s.len(), 2);
         assert!((s[0].1 - 12.0).abs() < 0.01);
         assert!((s[1].1 - 34.0).abs() < 0.01);
-        let h = provider_history(&id);
-        assert!(h.contains_key("5h"));
     }
 
     #[test]
@@ -131,6 +112,6 @@ mod tests {
         let id = format!("test-err-{}", crate::providers::now_secs());
         let e = QuotaSnapshot::err(&id, &id, &crate::providers::ProviderError::Network);
         record(&e);
-        assert!(series(&id, "5h").is_empty());
+        assert!(provider_history(&id).is_empty());
     }
 }

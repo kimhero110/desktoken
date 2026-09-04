@@ -67,7 +67,12 @@ impl QuotaSnapshot {
 
 #[derive(Debug)]
 pub enum ProviderError {
-    RateLimited { retry_after: Option<u64> },
+    /// Retry-After hint from the platform; poller currently uses its own
+    /// exponential backoff, so the field is informational (diagnostics/tooltips).
+    RateLimited {
+        #[allow(dead_code)]
+        retry_after: Option<u64>,
+    },
     AuthExpired,
     CredentialMissing,
     CredentialCorrupt { torn: bool },
@@ -109,6 +114,14 @@ pub async fn fetch_instance(
     id: &str,
     name: &str,
 ) -> Result<QuotaSnapshot, ProviderError> {
+    // custom monitors: id is the def id ("cp-...")
+    let s = crate::settings::load();
+    if let Some(def) = s.custom_providers.iter().find(|d| d.id == id) {
+        let mut snap = custom::fetch_snapshot(def).await?;
+        snap.provider_id = id.to_string();
+        snap.provider_name = name.to_string();
+        return Ok(snap);
+    }
     let (base, _suffix) = id.split_once('#').unwrap_or((id, ""));
     let mut snap = match base {
         "kimi" => kimi::fetch_instance(id).await?,
