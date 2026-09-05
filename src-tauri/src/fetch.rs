@@ -42,6 +42,15 @@ pub fn as_f64(v: &Value) -> Option<f64> {
     }
 }
 
+/// Resolve a number from a JSON path — or treat the "path" itself as a numeric
+/// literal (balance-style APIs report no total, so users write their plan's
+/// reference amount as the limit, e.g. `100`).
+pub fn number_at(v: &Value, path: &str) -> Option<f64> {
+    json_path(v, path)
+        .and_then(as_f64)
+        .or_else(|| path.trim().parse::<f64>().ok())
+}
+
 /// GET endpoint with auth header; returns (status, body truncated to 1MB).
 pub async fn get_with_auth(
     endpoint: &str,
@@ -54,7 +63,17 @@ pub async fn get_with_auth(
 
 /// GET endpoint with arbitrary headers; returns (status, body truncated to 1MB).
 pub async fn get_json(endpoint: &str, headers: &[(&str, &str)]) -> Result<(u16, String), String> {
-    let client = http_client();
+    get_json_via(http_client(), endpoint, headers).await
+}
+
+/// get_json against an explicit client — tests inject short-timeout clients
+/// here so timeout behavior can be exercised without waiting out the 15s
+/// production budget.
+async fn get_json_via(
+    client: &reqwest::Client,
+    endpoint: &str,
+    headers: &[(&str, &str)],
+) -> Result<(u16, String), String> {
     let mut req = client.get(endpoint).header("Accept", "application/json");
     for (name, value) in headers {
         req = req.header(*name, *value);
@@ -70,7 +89,14 @@ pub async fn get_json(endpoint: &str, headers: &[(&str, &str)]) -> Result<(u16, 
 
 /// POST form data; returns (status, body truncated to 1MB).
 pub async fn post_form(endpoint: &str, form: &[(&str, &str)]) -> Result<(u16, String), String> {
-    let client = http_client();
+    post_form_via(http_client(), endpoint, form).await
+}
+
+async fn post_form_via(
+    client: &reqwest::Client,
+    endpoint: &str,
+    form: &[(&str, &str)],
+) -> Result<(u16, String), String> {
     let resp = client
         .post(endpoint)
         .header("Accept", "application/json")
@@ -158,10 +184,16 @@ pub async fn verify_custom(
         serde_json::from_str(&body).map_err(|e| format!("响应不是合法 JSON: {}", e))?;
     let mut lines = vec![];
     for w in &def.windows {
-        let used = json_path(&json, &w.used_path).and_then(as_f64);
-        let limit = json_path(&json, &w.limit_path).and_then(as_f64);
+        let used = number_at(&json, &w.used_path);
+        let limit = number_at(&json, &w.limit_path);
         match (used, limit) {
-            (Some(u), Some(l)) => lines.push(format!("✓ [{}] used={} limit={}", w.label, u, l)),
+            (Some(u), Some(l)) => lines.push(format!(
+                "✓ [{}] used={} limit={}{}",
+                w.label,
+                u,
+                l,
+                if w.invert { "（低水位）" } else { "" }
+            )),
             _ => lines.push(format!("✗ [{}] 路径未取到数值", w.label)),
         }
     }
@@ -169,4 +201,138 @@ pub async fn verify_custom(
         lines.push("（未配置窗口映射，仅验证连通性）".into());
     }
     Ok(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Short-timeout client so timeout tests don't burn the 15s production budget.
+    fn fast_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn auth_header_is_sent() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/quota"))
+            .and(header("Authorization", "Bearer test-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let url = format!("{}/quota", server.uri());
+        let (status, _) = get_with_auth(&url, "Authorization", "Bearer ", "test-key")
+            .await
+            .unwrap();
+        assert_eq!(status, 200);
+        // expect(1) verified on drop
+    }
+
+    #[tokio::test]
+    async fn status_passes_through_including_429() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/quota"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .append_header("retry-after", "30")
+                    .set_body_string("{\"error\":\"slow down\"}"),
+            )
+            .mount(&server)
+            .await;
+        let url = format!("{}/quota", server.uri());
+        let (status, body) = get_json(&url, &[]).await.unwrap();
+        assert_eq!(status, 429);
+        assert!(body.contains("slow down"));
+    }
+
+    #[tokio::test]
+    async fn body_capped_at_1mb() {
+        let server = MockServer::start().await;
+        let big = vec![b'x'; 2 * 1024 * 1024]; // 2MB > 1MB cap
+        Mock::given(method("GET"))
+            .and(path("/big"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(big))
+            .mount(&server)
+            .await;
+        let url = format!("{}/big", server.uri());
+        let (status, body) = get_json(&url, &[]).await.unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(body.len(), 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn slow_server_maps_to_network_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_secs(30))
+                    .set_body_string("{}"),
+            )
+            .mount(&server)
+            .await;
+        let url = format!("{}/slow", server.uri());
+        let err = get_json_via(&fast_client(), &url, &[]).await.unwrap_err();
+        assert!(err.contains("网络错误"), "unexpected error: {}", err);
+    }
+
+    #[tokio::test]
+    async fn verify_custom_happy_path() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/quota"))
+            .and(header("x-api-key", "k-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                r#"{ "data": { "usage": { "used": 40, "limit": 100 } } }"#,
+            ))
+            .mount(&server)
+            .await;
+        let def = crate::settings::CustomProvider {
+            id: "cp-t".into(),
+            name: "T".into(),
+            endpoint: format!("{}/quota", server.uri()),
+            auth_header: "x-api-key".into(),
+            auth_prefix: "".into(),
+            poll_minutes: 5,
+            windows: vec![crate::settings::WindowMapping {
+                label: "周".into(),
+                used_path: "data.usage.used".into(),
+                limit_path: "data.usage.limit".into(),
+                reset_path: None,
+                invert: false,
+            }],
+        };
+        let report = verify_custom(&def, "k-1").await.unwrap();
+        assert!(report.contains("✓ [周] used=40 limit=100"), "{}", report);
+    }
+
+    #[tokio::test]
+    async fn verify_custom_429_message() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(429))
+            .mount(&server)
+            .await;
+        let def = crate::settings::CustomProvider {
+            id: "cp-t".into(),
+            name: "T".into(),
+            endpoint: server.uri(),
+            auth_header: "Authorization".into(),
+            auth_prefix: "Bearer ".into(),
+            poll_minutes: 5,
+            windows: vec![],
+        };
+        let err = verify_custom(&def, "k").await.unwrap_err();
+        assert!(err.contains("429"), "{}", err);
+    }
 }

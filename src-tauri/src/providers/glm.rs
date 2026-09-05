@@ -101,8 +101,17 @@ pub fn parse_value(v: &serde_json::Value) -> Result<QuotaSnapshot, ProviderError
 }
 
 async fn fetch_with_key(key: &str) -> Result<QuotaSnapshot, ProviderError> {
+    fetch_with_key_at(key, ENDPOINT_CN, ENDPOINT_GLOBAL).await
+}
+
+/// Endpoints as parameters so tests can point CN/global at a mock server.
+async fn fetch_with_key_at(
+    key: &str,
+    endpoint_cn: &str,
+    endpoint_global: &str,
+) -> Result<QuotaSnapshot, ProviderError> {
     // CN first, global fallback on 401/403 (wrong-region key)
-    let (status, body) = fetch::get_with_auth(ENDPOINT_CN, "Authorization", "", key)
+    let (status, body) = fetch::get_with_auth(endpoint_cn, "Authorization", "", key)
         .await
         .map_err(|_| ProviderError::Network)?;
     let try_parse = |b: &str| {
@@ -118,7 +127,7 @@ async fn fetch_with_key(key: &str) -> Result<QuotaSnapshot, ProviderError> {
     match status {
         200..=299 => return try_parse(&body),
         401 | 403 => {
-            let (status2, body2) = fetch::get_with_auth(ENDPOINT_GLOBAL, "Authorization", "", key)
+            let (status2, body2) = fetch::get_with_auth(endpoint_global, "Authorization", "", key)
                 .await
                 .map_err(|_| ProviderError::Network)?;
             return match status2 {
@@ -228,5 +237,101 @@ mod tests {
     fn malformed_is_parse_error() {
         assert!(matches!(parse("{}"), Err(ProviderError::ParseFailed)));
         assert!(matches!(parse("<html>"), Err(ProviderError::ParseFailed)));
+    }
+
+    // ---- HTTP contract tests (wiremock): endpoint injected via fetch_with_key_at ----
+
+    mod http {
+        use super::*;
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        const OK_BODY: &str = r#"{ "code":200, "data": { "planName":"Pro", "limits": [
+            { "type":"TOKENS_LIMIT", "unit":3, "percentage": 42, "nextResetTime": 1785816000000 }
+        ] } }"#;
+
+        fn cn(server: &MockServer) -> String {
+            format!("{}/cn", server.uri())
+        }
+        fn global(server: &MockServer) -> String {
+            format!("{}/global", server.uri())
+        }
+
+        #[tokio::test]
+        async fn happy_path_over_http_sends_raw_key() {
+            let server = MockServer::start().await;
+            // GLM auth: raw key in Authorization, NO Bearer prefix
+            Mock::given(method("GET"))
+                .and(path("/cn"))
+                .and(header("Authorization", "glm-key"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(OK_BODY))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let s = fetch_with_key_at("glm-key", &cn(&server), &global(&server))
+                .await
+                .unwrap();
+            assert_eq!(s.plan.as_deref(), Some("Pro"));
+            assert!((s.windows[0].used_percent - 42.0).abs() < 0.01);
+        }
+
+        #[tokio::test]
+        async fn cn_401_falls_back_to_global() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/cn"))
+                .respond_with(ResponseTemplate::new(401))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/global"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(OK_BODY))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let s = fetch_with_key_at("glm-key", &cn(&server), &global(&server))
+                .await
+                .unwrap();
+            assert_eq!(s.windows.len(), 1);
+        }
+
+        #[tokio::test]
+        async fn both_regions_401_is_auth_expired() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(401))
+                .mount(&server)
+                .await;
+            let r = fetch_with_key_at("bad-key", &cn(&server), &global(&server)).await;
+            assert!(matches!(r, Err(ProviderError::AuthExpired)));
+        }
+
+        #[tokio::test]
+        async fn http_429_maps_to_rate_limited() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/cn"))
+                .respond_with(
+                    ResponseTemplate::new(429).append_header("retry-after", "60"),
+                )
+                .mount(&server)
+                .await;
+            let r = fetch_with_key_at("glm-key", &cn(&server), &global(&server)).await;
+            assert!(matches!(r, Err(ProviderError::RateLimited { .. })));
+        }
+
+        #[tokio::test]
+        async fn http_200_with_error_body_is_auth_expired_over_http() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_string(r#"{ "code": 401, "msg": "无效的ApiKey" }"#),
+                )
+                .mount(&server)
+                .await;
+            let r = fetch_with_key_at("glm-key", &cn(&server), &global(&server)).await;
+            assert!(matches!(r, Err(ProviderError::AuthExpired)));
+        }
     }
 }

@@ -43,6 +43,9 @@ windows-sys = { version = "0.59", features = [
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
 
+[dev-dependencies]
+wiremock = "0.6"
+
 [profile.release]
 panic = "abort"
 lto = true

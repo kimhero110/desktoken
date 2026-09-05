@@ -79,7 +79,12 @@
 <div id="providers"></div>
 
 <h2>自定义监视（开放框架）</h2>
-<div class="note">任何"一个 GET 请求返回 JSON 额度"的平台都可以接入：填端点、认证头、JSON 路径映射（点语法，如 <span class="mono">data.limits.0.percentage</span>）。</div>
+<div class="note">任何"一个 GET 请求返回 JSON 额度"的平台都可以接入：填端点、认证头、JSON 路径映射（点语法，如 <span class="mono">data.limits.0.percentage</span>）。limit 路径也可直接填数字（参考额度，用于只报"已用/余额"的接口）；行尾加第 5 段 <span class="mono">invert</span> 进入低水位模式（余额越剩越少，条越红、越告警）。</div>
+<div class="note" style="margin-top:8px;">官方接口模板（点一下自动填表，key 仍需自己粘）：</div>
+<div class="row" style="margin:6px 0 10px; flex-wrap:wrap;">
+  <button class="ghost" data-tpl="moonshot-cn">Moonshot 余额（国内）</button>
+  <button class="ghost" data-tpl="moonshot-ai">Moonshot 余额（国际）</button>
+</div>
 <div id="customs"></div>
 <div class="card">
   <div class="head"><span class="name">添加自定义监视</span></div>
@@ -94,7 +99,7 @@
   </div>
   <div class="field"><label>API key（可留空，存凭据管理器）</label><input type="password" id="cp-key" class="mono" /></div>
   <div class="field">
-    <label>窗口映射（每行一个：标签 | used 路径 | limit 路径 | reset 路径(可选)）</label>
+    <label>窗口映射（每行一个：标签 | used 路径 | limit 路径或数字 | reset 路径(可选) | invert(可选)）</label>
     <textarea id="cp-windows" rows="3" class="mono" placeholder="周 | data.usage.used | data.usage.limit | data.usage.resetTime"></textarea>
   </div>
   <div class="row">
@@ -187,11 +192,42 @@
   // ---- custom providers ----
   function parseWindows(text) {
     return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
-      const [label, used, limit, reset] = l.split("|").map(s => (s || "").trim());
-      return { label, used_path: used, limit_path: limit, reset_path: reset || null };
+      const [label, used, limit, reset, flags] = l.split("|").map(s => (s || "").trim());
+      const invert = /^(invert|低水位)$/i.test(flags || "");
+      return { label, used_path: used, limit_path: limit, reset_path: reset || null, invert };
     }).filter(w => w.label && w.used_path && w.limit_path);
   }
   function newId() { return "cp-" + Date.now().toString(36); }
+
+  // ---- official-API templates: autofill the form; key still entered by user ----
+  const TEMPLATES = {
+    "moonshot-cn": {
+      name: "Moonshot 余额",
+      endpoint: "https://api.moonshot.cn/v1/users/me/balance",
+      auth_header: "Authorization", auth_prefix: "Bearer ", poll: 5,
+      windows: "余额消耗 | data.available_balance | 100 | | invert",
+      hint: "Moonshot 开放平台官方余额接口（文档：platform.moonshot.cn）。limit 里的 100 是参考充值额（美元），改成自己的；余额低于参考额 10% 时变红告警。key 在平台控制台生成。",
+    },
+    "moonshot-ai": {
+      name: "Moonshot 余额",
+      endpoint: "https://api.moonshot.ai/v1/users/me/balance",
+      auth_header: "Authorization", auth_prefix: "Bearer ", poll: 5,
+      windows: "余额消耗 | data.available_balance | 100 | | invert",
+      hint: "Moonshot 开放平台官方余额接口（国际站，文档：platform.kimi.ai）。limit 里的 100 是参考充值额（美元），改成自己的；余额低于参考额 10% 时变红告警。注意 .cn 与 .ai 的 key 不通用。",
+    },
+  };
+  document.querySelectorAll("[data-tpl]").forEach(b => b.addEventListener("click", () => {
+    const t = TEMPLATES[b.dataset.tpl];
+    $("cp-name").value = t.name;
+    $("cp-endpoint").value = t.endpoint;
+    $("cp-header").value = t.auth_header;
+    $("cp-prefix").value = t.auth_prefix;
+    $("cp-poll").value = t.poll;
+    $("cp-windows").value = t.windows;
+    const r = $("cp-result");
+    r.className = "verify-result"; r.textContent = t.hint;
+    $("cp-key").focus();
+  }));
   async function saveCustom(verify) {
     const def = {
       id: newId(),

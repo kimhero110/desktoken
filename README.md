@@ -45,14 +45,16 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 ## 支持平台
 
-| 平台 | 凭据来源 | 轮询 | 备注 |
-|---|---|---|---|
-| **Kimi** | 自动读 `~/.kimi-code/credentials/kimi-code.json`，或 Console API key | 2min | Kimi CLI 自家接口，稳 |
-| **GLM 智谱** | 手动粘 API key（进 Windows 凭据管理器） | 2min | 国内/国际双端点自动试，积分制套餐也认 |
-| **Codex** | 自动读 `~/.codex/auth.json`（OAuth 刷新） | 2min | Codex CLI 自用接口 |
-| **Claude** | 自动读 `~/.claude/.credentials.json`（OAuth 刷新写回） | **10min** | 非官方接口，频控敏感，轮询慢是故意的，别催 |
-| **Gemini** | 自动读 `~/.gemini/oauth_creds.json`，或 **Antigravity IDE** 的本地语言服务器（IDE 开着时数字和它的面板一模一样） | 5min | 两条通道自动选 |
-| **自定义** | 设置页配置 | ≥1min | 见下文开放框架 |
+| 平台 | 凭据来源 | 轮询 | 接口性质 | 备注 |
+|---|---|---|---|---|
+| **Kimi** | 自动读 `~/.kimi-code/credentials/kimi-code.json`，或 Console API key | 2min | CLI 同源 | Kimi CLI 自家接口，稳 |
+| **GLM 智谱** | 手动粘 API key（进 Windows 凭据管理器） | 2min | 半官方 | 智谱自家 coding 插件同源；国内/国际双端点自动试，积分制套餐也认 |
+| **Codex** | 自动读 `~/.codex/auth.json`（OAuth 刷新） | 2min | CLI 同源 | Codex CLI 自用接口 |
+| **Claude** | 自动读 `~/.claude/.credentials.json`（OAuth 刷新写回） | **10min** | 非官方 | 频控敏感，轮询慢是故意的，别催 |
+| **Gemini** | 自动读 `~/.gemini/oauth_creds.json`，或 **Antigravity IDE** 的本地语言服务器（IDE 开着时数字和它的面板一模一样） | 5min | CLI 同源 / IDE 本地 | 两条通道自动选 |
+| **自定义**（含官方模板） | 设置页配置 | ≥1min | 取决于端点 | 见下文开放框架；内置 Moonshot 官方余额模板 |
+
+> **关于「官方接口」**：各家**订阅额度**（5h 窗口/周窗口）都没有公开 API——只暴露给自家 CLI，这就是上表「CLI 同源」的含义，也是保守轮询 + 知情同意存在的原因。**API 按量付费**用户请走官方通道：设置页内置了 Moonshot 开放平台余额模板（官方文档接口），Anthropic/OpenAI 的组织计费 API 面向 org 管理员且需要动态日期参数，不适合血条形态，未做模板。
 
 没装的 CLI 那一行不会出现；哪家接口挂了，只有那行变灰，别家照常——**不把鸡蛋的崩溃放在一个篮子里**。
 
@@ -96,7 +98,7 @@ cargo tauri build    # 出安装包
 | **读取的凭据管理器条目** | `gemini:antigravity`（Antigravity 存的 Google 凭据，**只读**，从不写入） |
 | **唯一写回场景** | OAuth token 过期时换新并写回**同一个文件**。写回前做 compare-before-write：若官方 CLI 刚好也在刷新，采用它的，丢弃我们的——绝不抢方向盘 |
 | **手动 API key** | 只进 Windows 凭据管理器（服务名 `quotabar`），绝不落盘 |
-| **触达域名全表** | `api.kimi.com`、`auth.kimi.com`、`open.bigmodel.cn`、`api.z.ai`、`chatgpt.com`、`auth.openai.com`、`api.anthropic.com`、`console.anthropic.com`、`cloudcode-pa.googleapis.com`、`daily-cloudcode-pa.googleapis.com`、`oauth2.googleapis.com`、`api.github.com`、`github.com`（版本检查）。**多一个都没有** |
+| **触达域名全表** | `api.kimi.com`、`auth.kimi.com`、`open.bigmodel.cn`、`api.z.ai`、`chatgpt.com`、`auth.openai.com`、`api.anthropic.com`、`console.anthropic.com`、`cloudcode-pa.googleapis.com`、`daily-cloudcode-pa.googleapis.com`、`oauth2.googleapis.com`、`api.github.com`、`github.com`（版本检查）。**多一个都没有**。自定义监视/官方模板触达的域名由你自己的配置决定（如选用 Moonshot 模板则为 `api.moonshot.cn` 或 `api.moonshot.ai`） |
 | **绝不发送** | 凭据永不出这台机器；没有分析、没有崩溃上报、没有遥测 |
 
 日志在 `%APPDATA%\quotabar\spike.log`，落盘前过统一脱敏层。你要是还不放心——源码就在这儿，编译它。
@@ -115,10 +117,17 @@ cargo tauri build    # 出安装包
 
 - 端点 URL（一个 GET 返回 JSON 额度）
 - 认证头名 + 前缀（如 `Authorization` + `Bearer `）
-- 窗口映射：`标签 | used 路径 | limit 路径 | reset 路径(可选)`，点语法 `data.usage.used`，支持数组下标
+- 窗口映射：`标签 | used 路径 | limit 路径或数字 | reset 路径(可选) | invert(可选)`，点语法 `data.usage.used`，支持数组下标
 - 轮询间隔
 
 reset 字段自动识别 epoch 秒/毫秒/RFC3339。接进来就和内置五家同等待遇：同样的渲染、同样的告警、同样的失败隔离。
+
+两个进阶能力（为官方余额类接口准备）：
+
+- **limit 填数字**：只报「已用/余额」不报总额的接口（如余额 API），limit 直接写参考额度（如 `100`）
+- **invert 低水位模式**：行尾第 5 段加 `invert`，百分比反转——余额越剩越少，条越红，低于参考额 10% 触发 toast（和普通额度的「快用完」同一套告警）
+
+设置页内置**官方接口模板**（一键填表，key 自己粘）：Moonshot 开放平台余额（国内 `api.moonshot.cn` / 国际 `api.moonshot.ai`，官方文档接口，`GET /v1/users/me/balance`）。注意两站的 key 不通用。
 
 ## 卸载与清理
 

@@ -36,7 +36,9 @@ src-tauri/src/
 
 ## 已知欠账
 
-- [ ] wiremock 集成测试层（429+Retry-After/超时/2GB 截断）
+- [x] wiremock 集成测试层（429+Retry-After/超时/1MB 截断）— 2026-09-05 完成：
+      fetch.rs 拆 `*_via(client,...)` 注入测试 client，glm/custom 端点参数化，
+      15 个 HTTP 契约测试（`mod http`）落在各文件 `#[cfg(test)]` 内
 - [ ] 前端纯函数测试（fmtCountdown/suggestion）
 - [ ] 72h soak / 国产杀软实测 / Win10 实体 toast
 - [ ] Claude 通道真机出数验证（需登录）

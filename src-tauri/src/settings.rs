@@ -9,6 +9,10 @@ pub struct WindowMapping {
     pub limit_path: String,
     #[serde(default)]
     pub reset_path: Option<String>,
+    /// Low-watermark mode (余额类接口): percent is inverted so the bar/toasts
+    /// treat "balance running out" as "quota running out".
+    #[serde(default)]
+    pub invert: bool,
 }
 
 /// Custom provider definition (open framework): one GET → JSON quota, user-configured.
