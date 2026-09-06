@@ -523,6 +523,8 @@ fn begin_drag(window: WebviewWindow) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
     const VK_LBUTTON: i32 = 0x01;
+    // total-disturbance rule: dragging the bar invalidates the popup's anchor
+    close_sponsor_if_open(window.app_handle());
     std::thread::spawn(move || unsafe {
         let mut pt = POINT { x: 0, y: 0 };
         if GetCursorPos(&mut pt) == 0 {
@@ -579,6 +581,8 @@ fn begin_drag(window: WebviewWindow) {
 // ---------------------------------------------------------------------------
 
 fn set_mini_mode(window: &WebviewWindow, enable: bool) {
+    // total-disturbance rule: bar shape change closes the popup
+    close_sponsor_if_open(window.app_handle());
     // frontend owns height: it applies the .mini class then calls autosize
     rustlog(format!("set_mini_mode: emit mini-mode={}", enable));
     let _ = window.emit_to("main", "mini-mode", enable);
@@ -634,7 +638,18 @@ fn autosize(window: WebviewWindow, height: f64, width: Option<f64>) {
     // PHYSICAL size: tao LogicalSize conversion misfires on mixed-DPI setups
     let w = width.unwrap_or(s.width).clamp(120.0, 400.0);
     let phys = tauri::PhysicalSize::new((w * sf).round() as u32, (h * sf).round() as u32);
-    rustlog(format!("autosize: req={}x{:?} -> phys {:?}", height, width, phys));
+    // total-disturbance rule: a REAL bar resize (detail open/close etc.)
+    // invalidates the sponsor popup's anchor — close it. No-op repeats (same
+    // size, every poll) leave it alone.
+    static LAST_BAR_SIZE: std::sync::Mutex<Option<(u32, u32)>> = std::sync::Mutex::new(None);
+    if window.label() == "main" {
+        let mut last = LAST_BAR_SIZE.lock().unwrap_or_else(|e| e.into_inner());
+        let cur = (phys.width, phys.height);
+        if last.is_some() && *last != Some(cur) {
+            close_sponsor_if_open(window.app_handle());
+        }
+        *last = Some(cur);
+    }
     let _ = window.set_size(phys);
 }
 
@@ -662,23 +677,169 @@ fn open_settings_window(app: &tauri::AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// Sponsor window (quiet corner: shows the tip QR, never nags)
+// Sponsor popup (borderless transparent card — NOT a singleton dialog window)
+// Design: plan v3/v4 (autoplan rounds 1-2). Click-anywhere/Esc close lives in
+// sponsor.js (WebView2's child HWND eats mouse messages — Rust subclassing was
+// spike-proven impossible, see spike A note below). Rust owns: blur-close
+// (armed + debounced), disturbance-close (drag/mini/opacity/DPI), backstops.
 // ---------------------------------------------------------------------------
+
+/// armed only after the window has genuinely taken focus once (or a 500ms
+/// post-show timeout) — otherwise a stray Focused(false) during creation would
+/// insta-kill it, or a never-focused window would become an immortal orphan.
+static SPONSOR_ARMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+// card pixel spec (v4 design table): 280-wide card + 12px shadow gutter/side
+const SPONSOR_CARD_W: f64 = 280.0;
+const SPONSOR_CARD_H: f64 = 318.0;
+const SPONSOR_GUTTER: f64 = 12.0;
+
+fn close_sponsor_if_open(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("sponsor") {
+        let _ = w.close();
+    }
+}
+
+#[tauri::command]
+fn close_sponsor(app: tauri::AppHandle) {
+    close_sponsor_if_open(&app);
+}
+
+/// WS_EX_TOOLWINDOW keeps the popup out of Alt-Tab. Must run AFTER show():
+/// tao rewrites exstyle on first show (see apply_noactivate precedent).
+#[cfg(target_os = "windows")]
+fn apply_toolwindow(window: &WebviewWindow) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    };
+    if let Ok(hwnd) = window.hwnd() {
+        let raw: HWND = hwnd.0 as HWND;
+        unsafe {
+            let before = GetWindowLongPtrW(raw, GWL_EXSTYLE);
+            let after = (before | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize);
+            SetWindowLongPtrW(raw, GWL_EXSTYLE, after);
+            SetWindowPos(
+                raw,
+                std::ptr::null_mut(),
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
+            );
+            let confirm = GetWindowLongPtrW(raw, GWL_EXSTYLE);
+            rustlog(format!("sponsor toolwindow: before=0x{:X} confirm=0x{:X}", before, confirm));
+        }
+    }
+}
+
+fn sponsor_on_show(window: &WebviewWindow) {
+    let _ = window.show();
+    let _ = window.set_focus();
+    if let Ok(false) = window.is_focused() {
+        // foreground lock can legitimately refuse; the 500ms arm timer below
+        // keeps blur-close functional regardless
+        rustlog("sponsor: set_focus refused (foreground lock)".into());
+    }
+    #[cfg(target_os = "windows")]
+    apply_toolwindow(window);
+    // arm blur-close after 500ms even if Focused(true) never arrives
+    tauri::async_runtime::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        SPONSOR_ARMED.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
 fn open_sponsor_window(app: &tauri::AppHandle) {
-    open_singleton_window(
-        app,
-        SingletonWindowSpec {
-            label: "sponsor",
-            url: "sponsor.html",
-            title: if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" }.into(),
-            size: (224.0, 264.0),
-            always_on_top: false,
-            // momentary window: no taskbar slot
-            skip_taskbar: true,
-            minimizable: true,
-            focus_existing: true,
-        },
-    );
+    // re-click while open/closing: destroy and rebuild fresh (re-anchors to
+    // the bar, replays the entrance) — menu events are serialized so this is
+    // race-free
+    if let Some(w) = app.get_webview_window("sponsor") {
+        let _ = w.destroy();
+    }
+    SPONSOR_ARMED.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    let logical_w = SPONSOR_CARD_W + SPONSOR_GUTTER * 2.0;
+    let logical_h = SPONSOR_CARD_H + SPONSOR_GUTTER * 2.0;
+
+    // anchor below the bar, left-aligned, on the BAR's monitor; flip above
+    // when the bottom edge would overflow the work area. All math in physical
+    // pixels; logical sizes converted with the bar's monitor scale factor.
+    let mut pos = None;
+    if let Some(bar) = app.get_webview_window("main") {
+        if let (Ok(bp), Ok(bs), Ok(sf), Ok(Some(mon))) = (
+            bar.outer_position(),
+            bar.outer_size(),
+            bar.scale_factor(),
+            bar.current_monitor(),
+        ) {
+            let wa_pos = mon.position();
+            let wa = mon.size();
+            let gap = (6.0 * sf).round() as i32;
+            let win_w = (logical_w * sf).round() as i32;
+            let win_h = (logical_h * sf).round() as i32;
+            let mut y = bp.y + bs.height as i32 + gap;
+            if y + win_h > wa_pos.y + wa.height as i32 {
+                y = bp.y - gap - win_h; // flip above the bar
+            }
+            let x = bp.x.clamp(wa_pos.x, wa_pos.x + wa.width as i32 - win_w);
+            y = y.clamp(wa_pos.y, wa_pos.y + wa.height as i32 - win_h);
+            pos = Some(tauri::PhysicalPosition::new(x, y));
+        }
+    }
+
+    let mut b = WebviewWindowBuilder::new(app, "sponsor", WebviewUrl::App("sponsor.html".into()))
+        .title(if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" })
+        .inner_size(logical_w, logical_h)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(true)
+        .visible(false);
+    // transparent() is Windows/Linux-only; macOS vibrancy implies transparency
+    #[cfg(not(target_os = "macos"))]
+    {
+        b = b.transparent(true);
+    }
+    if let Some(p) = pos {
+        // builder position() takes physical coords as f64 pair
+        b = b.position(p.x as f64, p.y as f64);
+    }
+    // show on page load (no first-paint white flash)
+    b = b.on_page_load(|win, payload| {
+        if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+            sponsor_on_show(&win);
+        }
+    });
+    match b.build() {
+        Ok(w) => {
+            // macOS: vibrancy supplies translucency (mirrors the main bar)
+            #[cfg(target_os = "macos")]
+            {
+                use window_vibrancy::NSVisualEffectMaterial;
+                let _ = window_vibrancy::apply_vibrancy(&w, NSVisualEffectMaterial::HudWindow, None, None);
+            }
+            // 1s fallback: a stuck resource can never strand an invisible
+            // always-on-top window
+            let w2 = w.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if let Ok(false) = w2.is_visible() {
+                    rustlog("sponsor: page-load callback missed, fallback show".into());
+                    sponsor_on_show(&w2);
+                }
+            });
+            // final backstop: never leave an orphan — auto-close after 5min
+            let app2 = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                close_sponsor_if_open(&app2);
+            });
+        }
+        Err(e) => rustlog(format!("open sponsor window failed: {}", e)),
+    }
 }
 
 #[tauri::command]
@@ -869,6 +1030,7 @@ fn main() {
             check_update_cmd,
             open_url,
             get_history,
+            close_sponsor,
             updater_check::skip_version,
             updater_check::current_version,
         ])
@@ -950,6 +1112,35 @@ fn main() {
         })
         .on_menu_event(|app, ev| handle_menu_event(app, ev.id().as_ref()))
         .on_window_event(|window, ev| {
+            // sponsor popup lifecycle: armed blur-close + DPI-change close
+            if window.label() == "sponsor" {
+                match ev {
+                    tauri::WindowEvent::Focused(true) => {
+                        SPONSOR_ARMED.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    tauri::WindowEvent::Focused(false) => {
+                        if SPONSOR_ARMED.load(std::sync::atomic::Ordering::SeqCst) {
+                            // debounce 300ms: absorb transient focus flicker
+                            // (notifications, alt-tab preview) before closing
+                            let app = window.app_handle().clone();
+                            tauri::async_runtime::spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                                if let Some(w) = app.get_webview_window("sponsor") {
+                                    if let Ok(false) = w.is_focused() {
+                                        let _ = w.close();
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                        // card geometry was computed for the old scale — close
+                        // rather than render mismatched (total-disturbance rule)
+                        close_sponsor_if_open(window.app_handle());
+                    }
+                    _ => {}
+                }
+            }
             if let tauri::WindowEvent::Destroyed = ev {
                 // closing the ToS window without consent = decline: exit,
                 // still zero network requests made

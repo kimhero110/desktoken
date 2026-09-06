@@ -2,28 +2,56 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self'" />
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: transparent; }
   body {
     font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
-    background: #1b1b20; color: rgba(255,255,255,0.92);
-    padding: 14px 14px 12px; font-size: 13px; text-align: center;
+    /* 12px transparent gutter on every side: the card's shadow lives inside
+       the window so no shadow is hard-clipped by the window edge */
+    padding: 12px;
+    cursor: pointer;
     user-select: none;
   }
-  img {
-    width: 196px; height: 196px; display: block; margin: 0 auto;
-    border-radius: 10px; background: #fff; padding: 5px;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: #333; /* 裂图时 alt 文本在白卡上可读 */
+  #card {
+    background: rgba(18, 18, 22, 0.92);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    padding: 16px;
+    text-align: center;
+    animation: card-in 180ms ease-out;
   }
-  .sub { color: rgba(255,255,255,0.55); font-size: 10.5px; margin-top: 8px; }
-  .fine { color: rgba(255,255,255,0.5); font-size: 10px; margin-top: 3px; }
+  #card.closing { opacity: 0; transition: opacity 100ms ease-in; }
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  h1 { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.92); margin-bottom: 12px; }
+  .qrwrap {
+    width: 216px; height: 216px; margin: 0 auto 8px;
+    background: #fff; border-radius: 6px; padding: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .qrwrap img { width: 200px; height: 200px; display: block; color: #333; font-size: 10px; }
+  .qrwrap .qrfallback { color: #666; font-size: 10px; line-height: 1.6; display: none; }
+  .qrwrap.broken img { display: none; }
+  .qrwrap.broken .qrfallback { display: block; }
+  .sub { color: rgba(255,255,255,0.55); font-size: 10.5px; margin-bottom: 4px; }
+  .hint { color: rgba(255,255,255,0.38); font-size: 10px; }
 </style>
 </head>
 <body>
-  <img src="sponsor.jpg" alt="微信赞赏二维码，扫码可向作者打赏；若图片未显示，GitHub README 底部有同款赞赏码" />
-  <div class="sub">微信扫码 · 随缘打赏</div>
-  <div class="fine">完全自愿 · 功能不打折</div>
+  <div id="card" role="dialog" aria-label="微信赞赏" tabindex="-1">
+    <h1 id="t-title">请作者喝杯咖啡</h1>
+    <div class="qrwrap" id="qrwrap">
+      <img id="qr" src="sponsor.jpg" alt="微信赞赏二维码，扫码可向作者打赏；若图片未显示，GitHub README 底部有同款赞赏码" />
+      <div class="qrfallback" id="qrfallback">赞赏码加载失败<br/>GitHub README 底部有同款</div>
+    </div>
+    <div class="sub" id="t-sub">微信扫码 · 随缘打赏</div>
+    <div class="hint" id="t-hint">点击任意处关闭 · Esc</div>
+  </div>
+  <script src="sponsor.js"></script>
 </body>
 </html>

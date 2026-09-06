@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "QuotaBar default capability (sponsor window excluded: pure static page, no Tauri API)",
-  "windows": ["main", "settings", "tos"],
+  "windows": ["main", "settings", "tos", "sponsor"],
   "permissions": [
     "core:default",
     "core:event:allow-listen",
