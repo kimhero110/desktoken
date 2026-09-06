@@ -49,7 +49,7 @@ fn plan_from_credentials(path: &std::path::Path) -> Option<String> {
 async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
     const TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
     const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-    let (status, body) = fetch::post_form(
+    let (status, body, _retry_after) = fetch::post_form(
         TOKEN_URL,
         &[
             ("grant_type", "refresh_token"),
@@ -120,7 +120,7 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
     let path = cred_path()?;
     let (token, _source) = oauth::resolve_oauth_token(&path, &CRED_SPEC, refresh_call).await?;
     let auth = format!("Bearer {}", token);
-    let (status, body) = fetch::get_json(
+    let (status, body, retry_after) = fetch::get_json(
         ENDPOINT,
         &[
             ("Authorization", &auth),
@@ -136,7 +136,7 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
             Ok(snap)
         }
         401 | 403 => Err(ProviderError::AuthExpired),
-        429 => Err(ProviderError::RateLimited { retry_after: None }),
+        429 => Err(ProviderError::RateLimited { retry_after }),
         _ => Err(ProviderError::Network),
     }
 }

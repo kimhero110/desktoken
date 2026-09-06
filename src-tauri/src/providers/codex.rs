@@ -48,7 +48,7 @@ fn account_id(path: &std::path::Path) -> Option<String> {
 async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
     const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
     const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
-    let (status, body) = fetch::post_form(
+    let (status, body, _retry_after) = fetch::post_form(
         TOKEN_URL,
         &[
             ("grant_type", "refresh_token"),
@@ -165,7 +165,7 @@ pub fn parse(body: &str) -> Result<QuotaSnapshot, ProviderError> {
 async fn fetch_with_token(token: &str, account_id: &str) -> Result<QuotaSnapshot, ProviderError> {
     let auth = format!("Bearer {}", token);
     let acct = account_id.to_string();
-    let (status, body) = fetch::get_json(
+    let (status, body, retry_after) = fetch::get_json(
         ENDPOINT,
         &[("Authorization", &auth), ("chatgpt-account-id", &acct)],
     )
@@ -174,7 +174,7 @@ async fn fetch_with_token(token: &str, account_id: &str) -> Result<QuotaSnapshot
     match status {
         200..=299 => parse(&body),
         401 | 403 => Err(ProviderError::AuthExpired),
-        429 => Err(ProviderError::RateLimited { retry_after: None }),
+        429 => Err(ProviderError::RateLimited { retry_after }),
         _ => Err(ProviderError::Network),
     }
 }

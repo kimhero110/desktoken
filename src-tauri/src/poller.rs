@@ -8,6 +8,36 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
+use futures_util::FutureExt;
+
+fn period_for(base: &str, custom_minutes: Option<u64>) -> u64 {
+    match base {
+        "claude" => 600,
+        "gemini" => 300,
+        "custom" => custom_minutes.unwrap_or(5).clamp(1, 1440) * 60,
+        _ => 120,
+    }
+}
+
+fn instance_period(id: &str) -> u64 {
+    let s = settings::load();
+    if let Some(def) = s.custom_providers.iter().find(|d| d.id == id) {
+        return period_for("custom", Some(def.poll_minutes));
+    }
+    period_for(id.split('#').next().unwrap_or(id), None)
+}
+
+/// Jitter cannot shorten the configured minimum or server Retry-After.
+fn retry_delay(backoff: u64, period: u64, server: Option<u64>, jitter: i32) -> u64 {
+    let varied = backoff.saturating_mul((100 + jitter.clamp(-20, 20)) as u64) / 100;
+    varied.max(period).max(server.unwrap_or(0))
+}
+
+async fn isolate_fetch<F: std::future::Future<Output = Result<QuotaSnapshot, providers::ProviderError>>>(f: F)
+    -> Result<QuotaSnapshot, providers::ProviderError> {
+    std::panic::AssertUnwindSafe(f).catch_unwind().await
+        .unwrap_or(Err(providers::ProviderError::Internal))
+}
 
 pub const EVENT: &str = "quota://snapshot";
 
@@ -129,20 +159,24 @@ fn spawn_provider<F, Fut>(
     app: AppHandle,
     id: String,
     name: String,
-    period_secs: u64,
     fetch: F,
 ) -> tauri::async_runtime::JoinHandle<()>
 where
-    F: Fn() -> Fut + Send + 'static,
+    F: Fn() -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Result<QuotaSnapshot, providers::ProviderError>> + Send,
 {
     tauri::async_runtime::spawn(async move {
-        let mut backoff = period_secs;
+        let mut backoff = instance_period(&id);
         loop {
-            // failure isolation: a panic inside this task kills only this
-            // provider's task; other providers keep polling.
-            match fetch().await {
+            let period_secs = instance_period(&id);
+            backoff = backoff.max(period_secs).min(period_secs * 8);
+            let mut limited = false;
+            let mut server_delay = None;
+            // Include the call itself inside the unwind boundary, then retry normally.
+            match isolate_fetch(async { fetch().await }).await {
                 Ok(snap) => {
+                    let mut snap = providers::sanitize(snap);
+                    snap.stale_after_secs = period_secs.saturating_add(60).max(600);
                     backoff = period_secs;
                     let prev = last()
                         .lock()
@@ -156,8 +190,10 @@ where
                     emit(&app, snap);
                 }
                 Err(e) => {
-                    if let providers::ProviderError::RateLimited { .. } = e {
+                    if let providers::ProviderError::RateLimited { retry_after } = &e {
                         backoff = (backoff * 2).min(period_secs * 8);
+                        limited = true;
+                        server_delay = *retry_after;
                     }
                     if let Ok(mut m) = last().lock() {
                         let mut es = QuotaSnapshot::err(&id, &name, &e);
@@ -167,10 +203,22 @@ where
                     emit(&app, QuotaSnapshot::err(&id, &name, &e));
                 }
             }
-            // sleep for the backoff period, waking early on "立即刷新"
-            tokio::select! {
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(backoff)) => {}
-                _ = notify_refreshes().notified() => {}
+            if limited {
+                let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default().subsec_nanos();
+                let mut remaining = retry_delay(backoff, period_secs, server_delay, (nanos % 41) as i32 - 20);
+                // Ignore manual refresh during cooldown. Chunk huge server hints
+                // to avoid Instant overflow; the task remains abortable.
+                while remaining > 0 {
+                    let chunk = remaining.min(86400);
+                    tokio::time::sleep(std::time::Duration::from_secs(chunk)).await;
+                    remaining -= chunk;
+                }
+            } else {
+                tokio::select! {
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(backoff)) => {}
+                    _ = notify_refreshes().notified() => {}
+                }
             }
         }
     })
@@ -245,11 +293,6 @@ pub fn sync(app: AppHandle) {
     }
 
     // spawn new
-    let period_for = |base: &str| match base {
-        "claude" => 600, // ≥10min, ToS clamp
-        "gemini" => 300, // ≥5min
-        _ => 120,
-    };
     // tell the frontend the live set (loading placeholders for new rows)
     let live: Vec<serde_json::Value> = want
         .iter()
@@ -265,14 +308,12 @@ pub fn sync(app: AppHandle) {
         if m.contains_key(&inst.id) {
             continue;
         }
-        let period = period_for(&inst.base);
         let id2 = inst.id.clone();
         let name2 = inst.name.clone();
         let handle = spawn_provider(
             app.clone(),
             inst.id.clone(),
             inst.name.clone(),
-            period,
             move || {
                 let id = id2.clone();
                 let name = name2.clone();
@@ -288,10 +329,38 @@ pub fn sync(app: AppHandle) {
     }
 
     let _ = app.emit("providers-init", live);
+    refresh_now(); // existing tasks re-read settings; 429 cooldowns stay intact
 }
 
 /// Start polling (ToS gate: caller ensures consent). Kept as the historical
 /// entry point; now equivalent to sync().
 pub fn start(app: AppHandle) {
     sync(app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_period_and_minimums() {
+        assert_eq!(period_for("custom", Some(17)), 1020);
+        assert_eq!(period_for("custom", Some(0)), 60);
+        assert_eq!(period_for("custom", Some(u64::MAX)), 86400);
+        assert_eq!(period_for("claude", None), 600);
+    }
+
+    #[test]
+    fn server_cooldown_is_not_capped_by_local_backoff() {
+        assert_eq!(retry_delay(960, 120, Some(3600), -20), 3600);
+        assert_eq!(retry_delay(120, 120, None, -20), 120);
+        assert_eq!(retry_delay(240, 120, None, 20), 288);
+    }
+
+    #[tokio::test]
+    async fn panic_becomes_error_and_next_fetch_can_run() {
+        let result = isolate_fetch(async { panic!("fixture panic") }).await;
+        assert!(matches!(result, Err(providers::ProviderError::Internal)));
+        assert!(isolate_fetch(async { Ok(QuotaSnapshot::ok("test", "Test", None, vec![], "official")) }).await.is_ok());
+    }
 }

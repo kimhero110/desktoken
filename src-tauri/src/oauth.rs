@@ -5,8 +5,9 @@
 // the lock → refresh via the provider's token endpoint → compare-before-write
 // (if the file changed while we refreshed, the official CLI won: adopt its
 // token, drop ours) → atomic tmp+rename write-back with retries. If the
-// write-back ultimately fails the fresh token is still used in memory
-// (PendingWriteback lite) — we never lose a working token over a file lock.
+// write-back fails, keep the complete rotated pair in process memory and retry
+// persistence on later polls. A changed/deleted CLI file supersedes the cache.
+// Pending state does not survive process exit; compare-before-write is not CAS.
 //
 // The HTTP refresh call itself is injected by each provider so tests can stub
 // it and simulate adversarial CLI behavior (spike B).
@@ -165,6 +166,17 @@ fn path_mutex(path: &Path) -> std::sync::Arc<tokio::sync::Mutex<()>> {
         .clone()
 }
 
+#[derive(Clone)]
+struct PendingWrite {
+    original: String,
+    doc: Value,
+}
+
+fn pending_writes() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, PendingWrite>> {
+    static PENDING: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, PendingWrite>>> = std::sync::OnceLock::new();
+    PENDING.get_or_init(Default::default)
+}
+
 /// Atomic write-back: write sibling tmp file, then rename over the original
 /// with bounded retries (Windows file-lock tolerance). Failure here is NOT
 /// fatal to the caller — the token still works in memory.
@@ -214,33 +226,42 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = Result<RefreshResult, RefreshFailure>>,
 {
-    // Step 1: read every round (never cache credentials across polls).
-    let (_raw, doc) = read_doc(path)?;
-    let (access, refresh, expires) = extract(&doc, spec);
-    if let (Some(t), true) = (&access, is_fresh(expires)) {
-        return Ok((t.clone(), "official"));
-    }
-    let Some(rt) = refresh else {
-        // No refresh token: try the access token anyway (unknown expiry);
-        // a 401 from the usage endpoint maps to AuthExpired upstream.
-        return match access {
-            Some(t) => Ok((t, "official")),
-            None => Err(ProviderError::CredentialMissing),
-        };
-    };
-
-    // Step 2: single-flight per credential file.
+    // Serialize reads, pending retries and refreshes for this credential file.
     let mutex = path_mutex(path);
     let _guard = mutex.lock().await;
-
-    // Step 3: re-read inside the lock — another task (or the CLI itself) may
-    // have refreshed while we waited.
-    let (raw2, doc2) = read_doc(path)?;
+    let current = read_doc(path);
+    let pending = pending_writes().lock().unwrap_or_else(|e| e.into_inner()).get(path).cloned();
+    let (raw2, doc2) = if let Some(p) = pending {
+        match current {
+            Ok((raw, doc)) if raw != p.original => {
+                // A changed valid file belongs to the CLI (including logout).
+                pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+                (raw, doc)
+            }
+            Ok((raw, _)) => {
+                if write_back(path, &p.doc, rename_attempts, rename_delay_ms).is_ok() {
+                    pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+                    (serde_json::to_string_pretty(&p.doc).unwrap_or(raw), p.doc)
+                } else {
+                    (raw, p.doc)
+                }
+            }
+            Err(e) if !path.exists() => {
+                pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+                return Err(e);
+            }
+            Err(_) => (p.original, p.doc), // transient unreadable file: memory only
+        }
+    } else {
+        current?
+    };
     let (a2, r2, e2) = extract(&doc2, spec);
     if let (Some(t), true) = (&a2, is_fresh(e2)) {
         return Ok((t.clone(), "official"));
     }
-    let rt = r2.unwrap_or(rt);
+    let Some(rt) = r2 else {
+        return a2.map(|t| (t, "official")).ok_or(ProviderError::CredentialMissing);
+    };
 
     // Step 4: refresh.
     let rr = match do_refresh(rt).await {
@@ -284,15 +305,21 @@ where
             if let Ok(cd) = serde_json::from_str::<Value>(&cur) {
                 let (ca, _, _) = extract(&cd, spec);
                 if let Some(t) = ca {
+                    pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
                     return Ok((t, "official"));
                 }
             }
         }
     }
 
-    // Write-back failure is non-fatal: use the fresh token in memory
-    // (PendingWriteback lite; PLAN.md eng review #3).
-    let _ = write_back(path, &doc, rename_attempts, rename_delay_ms);
+    // Retain the complete rotated pair across polls until persistence succeeds.
+    // Never replace an unreadable/changed file using a stale comparison.
+    let unchanged = std::fs::read_to_string(path).map(|raw| raw == raw2).unwrap_or(false);
+    if unchanged && write_back(path, &doc, rename_attempts, rename_delay_ms).is_ok() {
+        pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+    } else {
+        pending_writes().lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_path_buf(), PendingWrite { original: raw2, doc });
+    }
     Ok((rr.access_token, "official"))
 }
 
@@ -336,6 +363,51 @@ pub(crate) mod tests {
             expires_in_secs: Some(3600),
             extra_writes: vec![],
         }
+    }
+
+    #[tokio::test]
+    async fn pending_pair_survives_polls_and_eventually_persists() {
+        let dir = tempdir("pending-recovery");
+        let p = dir.join("cred.json");
+        write_cred(&p, "old", "old-rt", 1);
+        let (first, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { Ok(ok_result("rotated")) }, 0, 0).await.unwrap();
+        assert_eq!(first, "rotated");
+        let (second, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { panic!("must reuse pending token") }, 0, 0).await.unwrap();
+        assert_eq!(second, "rotated");
+        let (third, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { panic!("must persist without refreshing") }, 1, 0).await.unwrap();
+        assert_eq!(third, "rotated");
+        let (_, doc) = read_doc(&p).unwrap();
+        assert_eq!(doc["refresh_token"], "rotated-rt");
+        assert!(!pending_writes().lock().unwrap().contains_key(&p));
+    }
+
+    #[tokio::test]
+    async fn cli_change_supersedes_pending_pair() {
+        let dir = tempdir("pending-cli");
+        let p = dir.join("cred.json");
+        write_cred(&p, "old", "rt", 1);
+        resolve_oauth_token_with(&p, &SPEC, |_| async { Ok(ok_result("ours")) }, 0, 0).await.unwrap();
+        write_cred(&p, "cli", "cli-rt", now_secs() + 3600);
+        let (token, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { panic!("CLI wins") }, 1, 0).await.unwrap();
+        assert_eq!(token, "cli");
+        assert!(!pending_writes().lock().unwrap().contains_key(&p));
+    }
+
+    #[tokio::test]
+    async fn expired_pending_pair_refreshes_with_rotated_refresh_token() {
+        let dir = tempdir("pending-expired");
+        let p = dir.join("cred.json");
+        write_cred(&p, "old", "old-rt", 1);
+        resolve_oauth_token_with(&p, &SPEC, |_| async {
+            let mut result = ok_result("rotated");
+            result.expires_in_secs = Some(0);
+            Ok(result)
+        }, 0, 0).await.unwrap();
+        let (token, _) = resolve_oauth_token_with(&p, &SPEC, |rt| async move {
+            assert_eq!(rt, "rotated-rt");
+            Ok(ok_result("renewed"))
+        }, 0, 0).await.unwrap();
+        assert_eq!(token, "renewed");
     }
 
     #[tokio::test]

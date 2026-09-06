@@ -93,6 +93,13 @@ impl Default for Settings {
 
 /// Cross-platform app data dir: %APPDATA%\quotabar on Windows,
 /// ~/Library/Application Support/quotabar on macOS, ~/.config/quotabar on Linux.
+#[cfg(test)]
+pub fn app_data_dir() -> PathBuf {
+    // Tests must never read/write the real user's settings or usage history.
+    std::env::temp_dir().join(format!("quotabar-tests-{}", std::process::id()))
+}
+
+#[cfg(not(test))]
 pub fn app_data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
@@ -111,6 +118,12 @@ pub fn settings_path() -> PathBuf {
     app_data_dir().join("settings.json")
 }
 
+#[cfg(test)]
+fn legacy_settings_path() -> PathBuf {
+    app_data_dir().join("legacy-settings.json")
+}
+
+#[cfg(not(test))]
 fn legacy_settings_path() -> PathBuf {
     // DeskToken-era dir (Windows); non-Windows never had one
     #[cfg(target_os = "windows")]

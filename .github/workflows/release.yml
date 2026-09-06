@@ -40,7 +40,7 @@ jobs:
       - name: Build & Bundle
         run: |
           cd src-tauri
-          cargo tauri build ${{ matrix.args }}
+          cargo tauri build ${{ matrix.args }} -- --locked
 
       - name: Generate checksums
         shell: bash
@@ -74,14 +74,16 @@ jobs:
             ## QuotaBar Release ${{ github.ref_name }}
 
             ### What's New
-            - Non-intrusive floating quota bar for Windows 10/11 & macOS
-            - Real-time tracking for Kimi, GLM, Codex, Claude, Gemini/Antigravity
-            - Universal Custom Provider JSON engine
-            - Zero telemetry, 100% local credentials storage
+            - Unknown/failed quota data now displays a gray dash; partial results are marked.
+            - Custom polling intervals take effect; quota HTTP 429 honors Retry-After and jittered backoff.
+            - Provider panics and unavailable history storage degrade gracefully.
+            - Failed OAuth writebacks retain the rotated token pair in memory for retry.
+            - Locked dependency checks, frontend regression tests, and corrected credential documentation.
+            - Full details: https://github.com/kimhero110/desktoken/blob/${{ github.ref_name }}/CHANGELOG.md
 
             ### Installation
-            - **Windows**: `QuotaBar_x64-setup.exe` (installer) or `quotabar.exe` (portable)
-            - **macOS**: `QuotaBar_x64.dmg` (drag to Applications)
+            - **Windows**: `QuotaBar_*_x64-setup.exe` (installer) or `quotabar.exe` (portable)
+            - **macOS**: `QuotaBar_*.dmg` (drag to Applications; see asset name for architecture)
 
             ### Verify
             `checksums-*.txt` contain SHA-256 hashes; build provenance attestation is on the *Attestations* tab.

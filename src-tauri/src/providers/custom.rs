@@ -7,14 +7,14 @@ use crate::settings::CustomProvider;
 
 pub async fn fetch_snapshot(def: &CustomProvider) -> Result<QuotaSnapshot, ProviderError> {
     let key = credentials::keyring_get(&format!("custom/{}", def.id)).unwrap_or_default();
-    let (status, body) =
+    let (status, body, retry_after) =
         fetch::get_with_auth(&def.endpoint, &def.auth_header, &def.auth_prefix, &key)
             .await
             .map_err(|_| ProviderError::Network)?;
     match status {
         200..=299 => {}
         401 | 403 => return Err(ProviderError::AuthExpired),
-        429 => return Err(ProviderError::RateLimited { retry_after: None }),
+        429 => return Err(ProviderError::RateLimited { retry_after }),
         _ => return Err(ProviderError::Network),
     }
     parse(&def, &body)

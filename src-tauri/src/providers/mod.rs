@@ -28,6 +28,7 @@ pub struct QuotaSnapshot {
     pub windows: Vec<QuotaWindow>,
     pub source: String, // "official" | "header_estimate" | "manual_key"
     pub fetched_at: EpochSecs,
+    pub stale_after_secs: u64,
     pub error: Option<String>, // Some => row renders in its error/stale state
 }
 
@@ -47,6 +48,7 @@ impl QuotaSnapshot {
             windows,
             source: source.into(),
             fetched_at: now_secs(),
+            stale_after_secs: 600,
             error: None,
         }
     }
@@ -60,6 +62,7 @@ impl QuotaSnapshot {
             windows: vec![],
             source: "official".into(),
             fetched_at: now_secs(),
+            stale_after_secs: 600,
             error: Some(e.short_msg().into()),
         }
     }
@@ -67,10 +70,8 @@ impl QuotaSnapshot {
 
 #[derive(Debug)]
 pub enum ProviderError {
-    /// Retry-After hint from the platform; poller currently uses its own
-    /// exponential backoff, so the field is informational (diagnostics/tooltips).
+    /// Server minimum delay in seconds; manual refresh must also respect it.
     RateLimited {
-        #[allow(dead_code)]
         retry_after: Option<u64>,
     },
     AuthExpired,
@@ -78,6 +79,7 @@ pub enum ProviderError {
     CredentialCorrupt { torn: bool },
     ParseFailed,
     Network,
+    Internal,
     UnsupportedClient,
     /// Antigravity IDE (language server) not running — Gemini via IDE channel
     IdeNotRunning,
@@ -94,6 +96,7 @@ impl ProviderError {
             ProviderError::CredentialCorrupt { torn: false } => "凭据损坏，请重新登录",
             ProviderError::ParseFailed => "接口变更，请检查更新",
             ProviderError::Network => "网络无法连接",
+            ProviderError::Internal => "平台处理异常，稍后自动重试",
             ProviderError::UnsupportedClient => "暂不支持，可在设置中停用",
             ProviderError::IdeNotRunning => "Antigravity 未运行",
         }

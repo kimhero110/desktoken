@@ -67,16 +67,22 @@ $confText = [System.IO.File]::ReadAllText($tauriConf)
 if ($confText -notmatch '"version": "[\d.]+"') { Fail "tauri.conf.json 里找不到 version" }
 [System.IO.File]::WriteAllText($tauriConf, ($confText -replace '"version": "[\d.]+"', "`"version`": `"$new`""))
 
-# ---------- 4. 测试门禁（本地镜像上跑，共享盘上 cargo 构建不可靠） ----------
-# 原因: rc.exe 不识别 UNC 长路径; 且 cargo 在共享上的增量缓存已腐化过一次。
-Write-Host "跑测试（本地镜像）..." -ForegroundColor Cyan
-$mir = Join-Path $env:TEMP "quotabar-release-src"
-robocopy $RepoRoot $mir /MIR /XD target /NFL /NDL /NJH /NJS /XF .git | Out-Null
-$env:CARGO_TARGET_DIR = Join-Path $env:TEMP "quotabar-release-target"
-Push-Location (Join-Path $mir 'src-tauri')
+# Keep the root package version in the source lockfile in sync before mirroring.
+$releaseLockPath = Join-Path $RepoRoot 'src-tauri/Cargo.lock'
+$releaseLockText = [System.IO.File]::ReadAllText($releaseLockPath)
+$releaseLockPattern = '(?m)(^name = "quotabar"\r?\nversion = ")[^"]+("\r?$)'
+if ($releaseLockText -notmatch $releaseLockPattern) { Fail "Cargo.lock 里找不到 quotabar 版本" }
+$releaseLockText = [regex]::Replace($releaseLockText, $releaseLockPattern, { param($m) $m.Groups[1].Value + $new + $m.Groups[2].Value })
+[System.IO.File]::WriteAllText($releaseLockPath, $releaseLockText)
+
+# ---------- 4. 测试门禁（当前本地仓库，复用现有构建缓存） ----------
+Write-Host "跑 Rust 与前端测试..." -ForegroundColor Cyan
+Push-Location (Join-Path $RepoRoot 'src-tauri')
 try {
-    cargo test
+    cargo test --locked
     if ($LASTEXITCODE -ne 0) { Fail "测试未通过，不发版" }
+    node --test ../tests/*.test.cjs
+    if ($LASTEXITCODE -ne 0) { Fail "前端测试未通过，不发版" }
 } finally { Pop-Location }
 
 # ---------- 5. 提交 + tag + 推送（GitHub + Gitee 双远端） ----------
@@ -84,7 +90,11 @@ git -C $RepoRoot add src-tauri\Cargo.toml src-tauri\Cargo.lock src-tauri\tauri.c
 git -C $RepoRoot commit -m "chore: release v$new" | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "commit 失败" }
 git -C $RepoRoot tag "v$new"
-foreach ($remote in @('origin', 'gitee')) {
+if ($LASTEXITCODE -ne 0) { Fail "tag 创建失败，停止推送" }
+$configuredRemotes = @(git -C $RepoRoot remote)
+$releaseRemotes = @('origin')
+if ($configuredRemotes -contains 'gitee') { $releaseRemotes += 'gitee' }
+foreach ($remote in $releaseRemotes) {
     git -C $RepoRoot push $remote main
     if ($LASTEXITCODE -ne 0) { Fail "push $remote main 失败（tag 未推，可重跑脚本）" }
     git -C $RepoRoot push $remote "v$new"
@@ -96,7 +106,7 @@ Write-Host "✓ v$new 已推送，CI 构建中（约 18 分钟）" -ForegroundCo
 Start-Sleep 20
 $runId = $null
 for ($i = 0; $i -lt 10; $i++) {
-    $run = gh run list --repo kimhero110/desktoken --limit 1 --json databaseId,headBranch 2>$null | ConvertFrom-Json
+    $run = gh run list --repo kimhero110/desktoken --workflow release.yml --branch "v$new" --limit 1 --json databaseId,headBranch 2>$null | ConvertFrom-Json
     if ($run -and $run[0].headBranch -eq "v$new") { $runId = $run[0].databaseId; break }
     Start-Sleep 10
 }
@@ -189,7 +199,7 @@ for ($i = 0; $i -lt 40; $i++) {
         if ($r.conclusion -eq 'success') {
             Write-Host "✓ GitHub v$new 发布成功: https://github.com/kimhero110/desktoken/releases/tag/v$new" -ForegroundColor Green
             gh release view "v$new" --repo kimhero110/desktoken --json assets -q '.assets[].name'
-            Publish-GiteeRelease $new
+            if ($configuredRemotes -contains 'gitee') { Publish-GiteeRelease $new }
         } else {
             Fail "CI 失败 ($($r.conclusion))，去 run 页面看日志"
         }

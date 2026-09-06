@@ -932,10 +932,11 @@ fn list_custom_providers() -> Vec<settings::CustomProvider> {
 }
 
 #[tauri::command]
-fn save_custom_provider(app: tauri::AppHandle, def: settings::CustomProvider, key: Option<String>) -> Result<(), String> {
+fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider, key: Option<String>) -> Result<(), String> {
     if def.name.trim().is_empty() || def.endpoint.trim().is_empty() {
         return Err("名称与端点 URL 不能为空".into());
     }
+    def.poll_minutes = def.poll_minutes.clamp(1, 1440);
     if let Some(k) = &key {
         let k = credentials::normalize_key(k);
         if !k.is_empty() {
@@ -977,7 +978,7 @@ async fn verify_provider(provider_id: String, custom_id: Option<String>) -> Resu
     let (endpoint, header, prefix) = credentials::manual_key_target(&provider_id)
         .ok_or("该平台不支持手动 key")?;
     let key = credentials::keyring_get(&provider_id).ok_or("尚未保存 key")?;
-    let (status, body) = fetch::get_with_auth(endpoint, header, prefix, &key).await?;
+    let (status, body, _) = fetch::get_with_auth(endpoint, header, prefix, &key).await?;
     match status {
         200..=299 => Ok(format!("验证成功（HTTP {}）", status)),
         401 | 403 => Err(format!("HTTP {} — key 无效或已过期，去控制台重新生成", status)),

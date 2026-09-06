@@ -11,12 +11,15 @@
 git clone https://github.com/kimhero110/desktoken.git
 cd desktoken/src-tauri
 cargo tauri dev     # 跑起来
-cargo test          # 提交前必须全绿（49+ 个 fixture/协议/对抗测试）
+cargo test --locked # 提交前必须全绿；测试设置和历史使用临时目录
+# 仓库根目录（Node.js 20+，无 npm 依赖）：
+cd ..
+node --test tests/*.test.cjs
 ```
 
 ## 硬规矩
 
-1. **提交前 `cargo test` 全绿。** 我们解析的全是别人的非官方接口，fixture 是命根子。
+1. **提交前 `cargo test --locked` 和前端 Node 回归测试全绿。** 我们解析的全是别人的非官方接口，fixture 是命根子。
 2. **发版只用 `release.ps1`**：`powershell -File release.ps1 patch`。版本号字段、tag、产物三处的同步只有这一条通道。Gitee 发版也包含在内（token 走 `GITEE_TOKEN` 环境变量或 `~/.quotabar-gitee-token`）。
 
 ## 加一个新平台（两条路）
@@ -39,7 +42,7 @@ cargo test          # 提交前必须全绿（49+ 个 fixture/协议/对抗测�
 
 - 日志与诊断输出必须过 `diagnostics.rs` 的脱敏层，别自己 `println!` token
 - 凭据读取集中走 `credentials.rs` / `oauth.rs`；新增外域凭据读取请在 PR 里单独说明
-- **赞赏码**：唯一事实源是 `src/sponsor.jpg`。更换它必须同步更新 `src-tauri/src/main.rs` 测试中的 `EXPECTED_SPONSOR_SHA256`，否则 `cargo test` 会红——这颗钉子既防打包遗漏，也防有人 PR 偷换收款码
+- **赞赏码**：唯一事实源是 `src/sponsor.jpg`。更换它必须同步更新 `src-tauri/src/main.rs` 测试中的 `EXPECTED_SPONSOR_SHA256`，否则 `cargo test --locked` 会红——这颗钉子既防打包遗漏，也防有人 PR 偷换收款码
 
 ## 讨论
 

@@ -40,13 +40,13 @@
   const contentZh = `
     <p>① QuotaBar 使用本机<b>官方 CLI 的登录凭据</b>，轮询各平台<b>非官方用量接口</b>，并自动读取已检测到的 CLI 凭据。</p>
     <p>② 这可能<b>违反平台服务条款</b>，理论上存在账号被限制的风险（保守轮询已尽可能降低该风险）。</p>
-    <p>③ Token 过期时会自动刷新并<b>写回凭据文件</b>（与官方 CLI 行为一致）。所有数据仅存本机，绝不上传。继续即表示你了解并接受。</p>
+    <p>③ Token 过期时会自动刷新并<b>写回凭据文件</b>（与官方 CLI 行为一致）。凭据本地存储，仅向对应服务端发送用于认证；自定义监视发送到你配置的端点。不发送遥测。继续即表示你了解并接受。</p>
   `;
 
   const contentEn = `
     <p>① QuotaBar uses local <b>official CLI credentials</b> to monitor LLM usage endpoints and automatically reads detected CLI configs.</p>
     <p>② Polling internal usage endpoints may <b>violate platform Terms of Service</b> with theoretical rate-limiting risks (conservative backoff intervals applied).</p>
-    <p>③ Expired tokens are automatically refreshed and <b>written back atomically</b> matching official CLI behavior. All data stays 100% on your local machine.</p>
+    <p>③ Expired tokens are automatically refreshed and <b>written back atomically</b> matching official CLI behavior. Credentials are stored locally and sent to the corresponding service for authentication (or your configured custom endpoint). No telemetry is sent.</p>
   `;
 
   document.getElementById("tos-title").textContent = isZh ? "QuotaBar — 使用前请知悉" : "QuotaBar — Before You Begin";

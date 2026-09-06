@@ -130,6 +130,7 @@
   <div id="providers"></div>
   <div id="detail"></div>
 </div>
+<script src="quota-state.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core;
   const listen = window.__TAURI__.event.listen;
@@ -199,9 +200,6 @@
     if (sameDay) return (isZh ? "今天 " : "today ") + hm;
     return `${dt.getMonth() + 1}/${dt.getDate()} ${hm}`;
   }
-  function isStale(fetchedAt) {
-    return Date.now() / 1000 - fetchedAt > 600;
-  }
   function fillClass(pct) { return pct >= 90 ? "fill danger" : pct >= 70 ? "fill warn" : "fill"; }
   function esc(t) { const d = document.createElement("div"); d.textContent = String(t); return d.innerHTML; }
 
@@ -210,7 +208,7 @@
     let tight = null;
     let roomy = null;
     for (const s of snapshots.values()) {
-      if (s.error) continue;
+      if (s.error || quotaIsStale(s)) continue;
       for (const w of s.windows) {
         if (w.used_percent >= 90 && (!tight || w.used_percent > tight.w.used_percent)) tight = { s, w };
         if ((w.label === "周" || w.label === "滚动") && w.used_percent < 70 && (!roomy || w.used_percent < roomy.w.used_percent)) roomy = { s, w };
@@ -236,13 +234,13 @@
       div.innerHTML = `<div class="header"><span class="dot stale"></span>${esc(pid)}<span class="freshness"></span></div><div class="loadingline">${I18N.loading}</div>`;
       providersEl.appendChild(div);
     }
-    let worst = 0;
+    const { worst, unavailable } = quotaSummary(snapshots.values());
     let errHintShown = false;
     try { errHintShown = localStorage.getItem("err-hint-shown") === "1"; } catch (e) {}
     for (const [id, s] of snapshots) {
       const div = document.createElement("div");
       div.className = "provider";
-      const stale = isStale(s.fetched_at);
+      const stale = quotaIsStale(s);
       let html = `<div class="header"><span class="dot${stale || s.error ? " stale" : ""}"></span>${esc(s.provider_name)}<span class="freshness">${fmtFresh(s.fetched_at, !!s.error)}</span></div>`;
       if (s.error && s.windows.length === 0) {
         html += `<div class="errline">${esc(s.error)}</div>`;
@@ -253,14 +251,13 @@
         }
       }
       for (const w of s.windows) {
-        worst = Math.max(worst, w.used_percent);
         const dim = stale ? " dimmed" : "";
         // reset flash: resets_at jumped forward => a new cycle began
         const key = id + "/" + w.label;
         const prev = prevResets.get(key);
         const justReset = prev && w.resets_at && w.resets_at > prev && w.resets_at > Date.now() / 1000 - 300;
         prevResets.set(key, w.resets_at);
-        html += `<div class="row${dim}${justReset ? " just-reset" : ""}" title="${esc(s.provider_name)} · ${esc(w.label)} 窗口&#10;已用 ${Math.round(w.used_percent)}%&#10;来源: ${s.source === "official" ? "官方接口" : s.source === "manual_key" ? "手动 key" : "响应头估算"}${s.plan ? " · " + esc(s.plan) : ""}">
+        html += `<div class="row${dim}${justReset ? " just-reset" : ""}" title="${esc(s.provider_name)} · ${esc(w.label)} 窗口&#10;已用 ${Math.round(w.used_percent)}%&#10;来源: ${s.source === "official" ? (isZh ? "CLI 同源接口" : "CLI service endpoint") : s.source === "manual_key" ? "手动 key" : "响应头估算"}${s.plan ? " · " + esc(s.plan) : ""}">
           <span class="label">${esc(w.label)}</span>
           <div class="bar"><div class="${fillClass(w.used_percent)}" style="width:${w.used_percent.toFixed(1)}%"></div></div>
           <span class="pct">${Math.round(w.used_percent)}%</span>
@@ -273,12 +270,13 @@
     }
     // strip status dot + ambient border alert follow worst window (design spec)
     const dot = document.getElementById("strip-dot");
-    const worstColor = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "#3FB950";
+    const worstColor = worst === null ? "#8B949E" : worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "#3FB950";
     dot.style.background = worstColor;
     bar.style.borderColor = worst >= 90 ? "#F85149" : worst >= 70 ? "#D29922" : "rgba(255,255,255,0.08)";
     const sw = document.getElementById("strip-worst");
     if (snapshots.size > 0) {
-      sw.textContent = Math.round(worst) + "%";
+      sw.textContent = worst === null ? "—" : Math.round(worst) + "%" + (unavailable ? " *" : "");
+      sw.title = unavailable ? (isZh ? "部分或全部平台数据不可用，汇总仅包含有效数据" : "Some providers unavailable; summary includes valid data only") : "";
       sw.style.color = worstColor;
     } else {
       sw.textContent = "";
@@ -296,7 +294,7 @@
     let html = "";
     for (const [id, s] of snapshots) {
       if (s.error && s.windows.length === 0) continue;
-      const meta = [s.plan, s.source === "official" ? "官方接口" : s.source === "manual_key" ? "手动 key" : "估算"]
+      const meta = [s.plan, s.source === "official" ? (isZh ? "CLI 同源接口" : "CLI service endpoint") : s.source === "manual_key" ? "手动 key" : "估算"]
         .filter(Boolean).join(" · ");
       html += `<div class="d-provider"><div class="d-head">${esc(s.provider_name)}<span class="d-meta">${esc(meta)}</span></div>`;
       for (const w of s.windows) {

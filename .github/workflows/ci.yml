@@ -14,11 +14,16 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Frontend regression tests
+        run: node --test tests/*.test.cjs
       - name: Test
         run: |
           cd src-tauri
-          cargo test
+          cargo test --locked
       - name: Build (dev, catches windows-specific issues)
         run: |
           cd src-tauri
-          cargo build
+          cargo build --locked

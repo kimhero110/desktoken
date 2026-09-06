@@ -228,7 +228,7 @@ async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oau
     const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
     const CLIENT_ID: &str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
     const CLIENT_SECRET: &str = "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";
-    let (status, body) = fetch::post_form(
+    let (status, body, _retry_after) = fetch::post_form(
         TOKEN_URL,
         &[
             ("grant_type", "refresh_token"),
@@ -331,11 +331,11 @@ pub fn parse_quota(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
     Ok(windows)
 }
 
-fn map_status(status: u16) -> ProviderError {
+fn map_status(status: u16, retry_after: Option<u64>) -> ProviderError {
     match status {
         401 => ProviderError::AuthExpired,
         403 => ProviderError::UnsupportedClient, // consumer tier removed
-        429 => ProviderError::RateLimited { retry_after: None },
+        429 => ProviderError::RateLimited { retry_after },
         _ => ProviderError::Network,
     }
 }
@@ -362,7 +362,7 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
     let load_body = serde_json::json!({
         "metadata": { "ideType": "IDE_UNSPECIFIED", "pluginType": "GEMINI" }
     });
-    let (status, body) = fetch::post_json_ua(
+    let (status, body, retry_after) = fetch::post_json_ua(
         &format!("{}:loadCodeAssist", BASE_CLASSIC),
         &token,
         None,
@@ -371,12 +371,12 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
     .await
     .map_err(|_| ProviderError::Network)?;
     if !(200..300).contains(&status) {
-        return Err(map_status(status));
+        return Err(map_status(status, retry_after));
     }
     let (project, plan) = parse_load(&body)?;
 
     let quota_body = serde_json::json!({ "project": project });
-    let (status, body) = fetch::post_json_ua(
+    let (status, body, retry_after) = fetch::post_json_ua(
         &format!("{}:retrieveUserQuota", BASE_CLASSIC),
         &token,
         None,
@@ -385,7 +385,7 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
     .await
     .map_err(|_| ProviderError::Network)?;
     if !(200..300).contains(&status) {
-        return Err(map_status(status));
+        return Err(map_status(status, retry_after));
     }
     let windows = parse_quota(&body)?;
     Ok(QuotaSnapshot::ok(ID, NAME, plan, windows, "official"))

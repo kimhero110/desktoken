@@ -2,7 +2,7 @@
 
 <p align="center"><img src="docs/icon-256.png" width="96" alt="QuotaBar logo" /></p>
 
-> **EN**: A tiny acrylic bar that lives on your Windows desktop and tells you exactly how much of your Claude / Kimi / Codex / GLM / Gemini quota is left — before the 429 does. Open source (MIT), zero telemetry, credentials never leave your machine. [Quick Start](#安装).
+> **EN**: A tiny acrylic bar that lives on your Windows desktop and tells you exactly how much of your Claude / Kimi / Codex / GLM / Gemini quota is left — before the 429 does. Open source (MIT), zero telemetry, credentials are stored locally and sent only to the configured service for authentication. [Quick Start](#安装).
 
 ![QuotaBar 悬浮条](docs/screenshot.png)
 
@@ -76,17 +76,18 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 ```bash
 git clone https://github.com/kimhero110/desktoken.git
 cd desktoken/src-tauri
+cargo install tauri-cli --version "^2" --locked
 cargo tauri dev      # 开发模式
-cargo tauri build    # 出安装包
+cargo tauri build -- --locked    # 出安装包
 ```
 
-要求：Rust stable + Windows 10/11。
+要求：Rust stable、Tauri CLI；Windows 构建还需要 MSVC C++ Build Tools 与 WebView2。前端运行和构建不依赖 Node；运行前端回归测试需要 Node.js 20+。
 
 ## 首次运行
 
 第一次启动会弹一个**知情同意**对话框。在你点「同意」之前，程序**不发任何网络请求**——欢迎开抓包工具监督。
 
-大意是：它用你本机 CLI 的登录凭据去轮询各家非官方用量接口，理论上违反平台 ToS（保守轮询把风险压到很低）；token 过期会自动刷新写回；数据全在你本机。同意就开工，不同意就退出，不纠缠。
+大意是：它用本机 CLI 的登录凭据查询各家内部用量接口；token 过期会自动刷新并写回。设置与历史保存在本机，认证凭据会发送到对应服务端，自定义监视则使用你配置的端点；没有遥测。具体使用限制以对应平台条款为准。
 
 ## 凭据行为清单（安全核心）
 
@@ -96,20 +97,20 @@ cargo tauri build    # 出安装包
 |---|---|
 | **读取的文件** | `~/.kimi-code/credentials/kimi-code.json`、`~/.codex/auth.json`、`~/.claude/.credentials.json`、`~/.gemini/oauth_creds.json` |
 | **读取的凭据管理器条目** | `gemini:antigravity`（Antigravity 存的 Google 凭据，**只读**，从不写入） |
-| **唯一写回场景** | OAuth token 过期时换新并写回**同一个文件**。写回前做 compare-before-write：若官方 CLI 刚好也在刷新，采用它的，丢弃我们的——绝不抢方向盘 |
+| **唯一写回场景** | OAuth token 过期时换新并写回**同一个文件**。写回前做 compare-before-write：若检测到官方 CLI 已更改文件，采用它的；写前比较不能完全消除跨进程竞争窗口 |
 | **手动 API key** | 只进 Windows 凭据管理器（服务名 `quotabar`），绝不落盘 |
 | **触达域名全表** | `api.kimi.com`、`auth.kimi.com`、`open.bigmodel.cn`、`api.z.ai`、`chatgpt.com`、`auth.openai.com`、`api.anthropic.com`、`console.anthropic.com`、`cloudcode-pa.googleapis.com`、`daily-cloudcode-pa.googleapis.com`、`oauth2.googleapis.com`、`api.github.com`、`github.com`（版本检查）。**多一个都没有**。自定义监视/官方模板触达的域名由你自己的配置决定（如选用 Moonshot 模板则为 `api.moonshot.cn` 或 `api.moonshot.ai`） |
-| **绝不发送** | 凭据永不出这台机器；没有分析、没有崩溃上报、没有遥测 |
+| **网络认证与遥测** | 凭据本地存储，仅向对应服务端发送用于认证；自定义监视发送到用户配置的端点。没有分析、崩溃上报或遥测 |
 
 日志在 `%APPDATA%\quotabar\spike.log`，落盘前过统一脱敏层。你要是还不放心——源码就在这儿，编译它。
 
 ## 工作原理
 
-- **轮询**：每家一个独立任务，启动即取数，然后按上表节奏；系统睡醒了自动错峰全量刷新（不会因为补发风暴把你限流）
-- **失败隔离**：一家解析挂了只灰那一行。别家不陪葬
-- **429 退避**：遵从 Retry-After，指数退避封顶 8 倍周期，加 ±20% 抖动（不跟大家挤同一秒重试）
+- **轮询**：每家一个独立任务，启动即取数，然后按上表节奏；自定义间隔为 1–1440 分钟，保存后唤醒任务重新读取配置；限流冷却中的任务仍等待到期。尚未实现专门的系统唤醒错峰调度
+- **失败隔离**：平台请求/解析异常只影响该行，Rust unwind panic 转为错误并继续重试；历史数据库打不开时跳过历史记录，下次再尝试。无有效数据时迷你条显示灰色「—」，部分平台不可用时有效汇总附带「*」
+- **429 退避**：额度 HTTP 429 保留 Retry-After（秒数或 HTTP 日期）；本地指数退避基数封顶 8 倍周期并加 ±20% 抖动，最终等待不少于配置周期与服务端要求。手动刷新不会绕过当前限流冷却。OAuth 刷新端点的 429 目前仍按网络失败处理
 - **宽容解析**：接口字段缺了、类型变了，能解就解；解不了就老实说「接口变更，请检查更新」，而不是显示一堆 NaN
-- **OAuth 写回六步协议**：重读 → 临过期 5 分钟才刷 → 单飞锁 → compare-before-write → 原子改名重试 6 次 → 写不进就用内存里的，反正不丢你的登录态
+- **OAuth 写回六步协议**：每轮在单飞锁内重读 → 临过期 5 分钟刷新 → 写前比较 → 原子改名重试 6 次。写回失败时在进程内保留完整的新 token 对，下轮先重试写回；CLI 文件发生有效变更或删除时放弃待写回数据。进程退出后内存状态不保留；跨进程写前比较仍不是原子 CAS
 
 ## 自定义监视引擎（开放框架）
 
@@ -118,7 +119,7 @@ cargo tauri build    # 出安装包
 - 端点 URL（一个 GET 返回 JSON 额度）
 - 认证头名 + 前缀（如 `Authorization` + `Bearer `）
 - 窗口映射：`标签 | used 路径 | limit 路径或数字 | reset 路径(可选) | invert(可选)`，点语法 `data.usage.used`，支持数组下标
-- 轮询间隔
+- 轮询间隔（1–1440 分钟，超出范围自动限制）
 
 reset 字段自动识别 epoch 秒/毫秒/RFC3339。接进来就和内置五家同等待遇：同样的渲染、同样的告警、同样的失败隔离。
 
@@ -190,7 +191,7 @@ reset 字段自动识别 epoch 秒/毫秒/RFC3339。接进来就和内置五家�
 
 欢迎 issue 和 PR。两条规矩：
 
-1. **提交前跑 `cargo test`**（src-tauri 目录）
+1. **提交前检查**：在 `src-tauri` 目录运行 `cargo test --locked`，在仓库根目录运行 `node --test tests/*.test.cjs`。
 2. **发版用 `release.ps1`**：`powershell -File release.ps1 patch`（bump → 测试 → tag → CI 一条龙，别手工同步版本号，会乱）
 
 License: [MIT](LICENSE)

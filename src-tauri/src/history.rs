@@ -5,7 +5,7 @@ use crate::providers::QuotaSnapshot;
 use rusqlite::Connection;
 use std::sync::Mutex;
 
-static DB: std::sync::OnceLock<Mutex<Connection>> = std::sync::OnceLock::new();
+static DB: Mutex<Option<Connection>> = Mutex::new(None);
 
 fn db_path() -> std::path::PathBuf {
     let dir = crate::settings::app_data_dir();
@@ -13,9 +13,8 @@ fn db_path() -> std::path::PathBuf {
     dir.join("history.db")
 }
 
-fn db() -> &'static Mutex<Connection> {
-    DB.get_or_init(|| {
-        let conn = Connection::open(db_path()).expect("open history.db");
+fn open_db(path: &std::path::Path) -> rusqlite::Result<Connection> {
+        let conn = Connection::open(path)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS samples (
                 provider TEXT NOT NULL,
@@ -24,10 +23,16 @@ fn db() -> &'static Mutex<Connection> {
                 used_pct REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_samples ON samples(provider, label, ts);",
-        )
-        .expect("create samples table");
-        Mutex::new(conn)
-    })
+        )?;
+        Ok(conn)
+}
+
+fn db() -> std::sync::MutexGuard<'static, Option<Connection>> {
+    let mut guard = DB.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = open_db(&db_path()).ok(); // retry next time; history must not stop polling
+    }
+    guard
 }
 
 /// Record one snapshot (called on every successful poll).
@@ -35,7 +40,8 @@ pub fn record(snap: &QuotaSnapshot) {
     if snap.error.is_some() || snap.windows.is_empty() {
         return;
     }
-    let Ok(conn) = db().lock() else { return };
+    let guard = db();
+    let Some(conn) = guard.as_ref() else { return };
     let ts = snap.fetched_at;
     for w in &snap.windows {
         let _ = conn.execute(
@@ -51,7 +57,8 @@ pub fn record(snap: &QuotaSnapshot) {
 /// All window series for one provider: { label: [(ts, pct)] }.
 pub fn provider_history(provider: &str) -> std::collections::BTreeMap<String, Vec<(i64, f64)>> {
     let mut out = std::collections::BTreeMap::new();
-    let Ok(conn) = db().lock() else { return out };
+    let guard = db();
+    let Some(conn) = guard.as_ref() else { return out };
     let cutoff = crate::providers::now_secs() - 7 * 86400;
     let mut stmt = match conn.prepare(
         "SELECT label, ts, used_pct FROM samples WHERE provider = ?1 AND ts >= ?2 ORDER BY ts",
@@ -79,6 +86,14 @@ pub fn provider_history(provider: &str) -> std::collections::BTreeMap<String, Ve
 mod tests {
     use super::*;
     use crate::providers::QuotaWindow;
+
+    #[test]
+    fn unavailable_database_is_recoverable() {
+        let dir = crate::settings::app_data_dir().join("history-unavailable");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(open_db(&dir).is_err());
+        assert!(open_db(&dir.join("recovered.db")).is_ok());
+    }
 
     fn snap_for(id: &str, pct: f64) -> QuotaSnapshot {
         QuotaSnapshot::ok(

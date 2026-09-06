@@ -90,7 +90,7 @@
   <div class="head"><span class="name">添加自定义监视</span></div>
   <div class="grid2">
     <div class="field"><label>名称</label><input type="text" id="cp-name" placeholder="例如 Qwen" /></div>
-    <div class="field"><label>轮询间隔（分钟）</label><input type="number" id="cp-poll" value="5" min="1" /></div>
+    <div class="field"><label>轮询间隔（1–1440 分钟）</label><input type="number" id="cp-poll" value="5" min="1" max="1440" /></div>
   </div>
   <div class="field"><label>端点 URL</label><input type="text" id="cp-endpoint" class="mono" placeholder="https://api.example.com/v1/quota" /></div>
   <div class="grid2">
@@ -119,6 +119,7 @@
 
   // ---- appearance ----
   const op = $("opacity"), wsel = $("width"), ct = $("ct");
+  function escapeHtml(value) { return String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c])); }
   function showOp() { $("opv").textContent = Math.round(op.value * 100) + "%"; }
   function applyAppearance() {
     invoke("apply_appearance", { opacity: parseFloat(op.value), width: parseFloat(wsel.value), miniMode: ct.checked });
@@ -260,11 +261,11 @@
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
-        <div class="head"><span class="name">${c.name}</span><span class="status manual">${c.poll_minutes}min</span></div>
-        <div class="note mono">${c.endpoint}</div>
+        <div class="head"><span class="name">${escapeHtml(c.name)}</span><span class="status manual">${c.poll_minutes}min</span></div>
+        <div class="note mono">${escapeHtml(c.endpoint)}</div>
         <div class="note">${c.windows.length} 个窗口映射</div>
-        <div class="keyrow"><button class="ghost" data-cverify="${c.id}">验证</button><button class="danger" data-cdel="${c.id}">删除</button></div>
-        <div class="verify-result" id="cvr-${c.id}"></div>`;
+        <div class="keyrow"><button class="ghost" data-cverify="${escapeHtml(c.id)}">验证</button><button class="danger" data-cdel="${escapeHtml(c.id)}">删除</button></div>
+        <div class="verify-result" id="cvr-${escapeHtml(c.id)}"></div>`;
       wrap.appendChild(card);
     }
     wrap.querySelectorAll("[data-cdel]").forEach(b => b.addEventListener("click", async () => {

@@ -45,7 +45,7 @@ pub async fn resolve_token() -> Result<(String, &'static str), ProviderError> {
 async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
     const TOKEN_URL: &str = "https://auth.kimi.com/api/oauth/token";
     const CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
-    let (status, body) = fetch::post_form(
+    let (status, body, _retry_after) = fetch::post_form(
         TOKEN_URL,
         &[
             ("grant_type", "refresh_token"),
@@ -161,13 +161,13 @@ pub fn parse_value(v: &serde_json::Value) -> Result<QuotaSnapshot, ProviderError
 }
 
 async fn fetch_with_bearer(token: &str) -> Result<QuotaSnapshot, ProviderError> {
-    let (status, body) = fetch::get_with_auth(ENDPOINT, "Authorization", "Bearer ", token)
+    let (status, body, retry_after) = fetch::get_with_auth(ENDPOINT, "Authorization", "Bearer ", token)
         .await
         .map_err(|_| ProviderError::Network)?;
     match status {
         200..=299 => parse(&body),
         401 | 403 => Err(ProviderError::AuthExpired),
-        429 => Err(ProviderError::RateLimited { retry_after: None }),
+        429 => Err(ProviderError::RateLimited { retry_after }),
         _ => Err(ProviderError::Network),
     }
 }

@@ -111,7 +111,7 @@ async fn fetch_with_key_at(
     endpoint_global: &str,
 ) -> Result<QuotaSnapshot, ProviderError> {
     // CN first, global fallback on 401/403 (wrong-region key)
-    let (status, body) = fetch::get_with_auth(endpoint_cn, "Authorization", "", key)
+    let (status, body, retry_after) = fetch::get_with_auth(endpoint_cn, "Authorization", "", key)
         .await
         .map_err(|_| ProviderError::Network)?;
     let try_parse = |b: &str| {
@@ -127,17 +127,17 @@ async fn fetch_with_key_at(
     match status {
         200..=299 => return try_parse(&body),
         401 | 403 => {
-            let (status2, body2) = fetch::get_with_auth(endpoint_global, "Authorization", "", key)
+            let (status2, body2, retry_after2) = fetch::get_with_auth(endpoint_global, "Authorization", "", key)
                 .await
                 .map_err(|_| ProviderError::Network)?;
             return match status2 {
                 200..=299 => try_parse(&body2),
                 401 | 403 => Err(ProviderError::AuthExpired),
-                429 => Err(ProviderError::RateLimited { retry_after: None }),
+                429 => Err(ProviderError::RateLimited { retry_after: retry_after2 }),
                 _ => Err(ProviderError::Network),
             };
         }
-        429 => Err(ProviderError::RateLimited { retry_after: None }),
+        429 => Err(ProviderError::RateLimited { retry_after }),
         _ => Err(ProviderError::Network),
     }
 }

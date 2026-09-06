@@ -6,6 +6,17 @@ use std::sync::OnceLock;
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
+/// HTTP Retry-After accepts delta-seconds or an HTTP date (IMF-fixdate).
+fn parse_retry_after(value: &str, now: std::time::SystemTime) -> Option<u64> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(seconds);
+    }
+    let date = chrono::DateTime::parse_from_rfc2822(value).ok()?;
+    let now = now.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some(date.timestamp().max(0) as u64).map(|t| t.saturating_sub(now))
+}
+
 pub fn http_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
@@ -51,18 +62,18 @@ pub fn number_at(v: &Value, path: &str) -> Option<f64> {
         .or_else(|| path.trim().parse::<f64>().ok())
 }
 
-/// GET endpoint with auth header; returns (status, body truncated to 1MB).
+/// GET endpoint with auth header; returns (status, body truncated to 1MB, Retry-After seconds).
 pub async fn get_with_auth(
     endpoint: &str,
     header: &str,
     prefix: &str,
     key: &str,
-) -> Result<(u16, String), String> {
+) -> Result<(u16, String, Option<u64>), String> {
     get_json(endpoint, &[(header, &format!("{}{}", prefix, key))]).await
 }
 
-/// GET endpoint with arbitrary headers; returns (status, body truncated to 1MB).
-pub async fn get_json(endpoint: &str, headers: &[(&str, &str)]) -> Result<(u16, String), String> {
+/// GET endpoint with arbitrary headers; returns (status, body truncated to 1MB, Retry-After seconds).
+pub async fn get_json(endpoint: &str, headers: &[(&str, &str)]) -> Result<(u16, String, Option<u64>), String> {
     get_json_via(http_client(), endpoint, headers).await
 }
 
@@ -73,7 +84,7 @@ async fn get_json_via(
     client: &reqwest::Client,
     endpoint: &str,
     headers: &[(&str, &str)],
-) -> Result<(u16, String), String> {
+) -> Result<(u16, String, Option<u64>), String> {
     let mut req = client.get(endpoint).header("Accept", "application/json");
     for (name, value) in headers {
         req = req.header(*name, *value);
@@ -83,12 +94,13 @@ async fn get_json_via(
         .await
         .map_err(|e| format!("网络错误: {}", e))?;
     let status = resp.status().as_u16();
+    let retry_after = resp.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
     let text = read_capped_body(resp, 1024 * 1024).await?;
-    Ok((status, text))
+    Ok((status, text, retry_after))
 }
 
-/// POST form data; returns (status, body truncated to 1MB).
-pub async fn post_form(endpoint: &str, form: &[(&str, &str)]) -> Result<(u16, String), String> {
+/// POST form data; returns (status, body truncated to 1MB, Retry-After seconds).
+pub async fn post_form(endpoint: &str, form: &[(&str, &str)]) -> Result<(u16, String, Option<u64>), String> {
     post_form_via(http_client(), endpoint, form).await
 }
 
@@ -96,7 +108,7 @@ async fn post_form_via(
     client: &reqwest::Client,
     endpoint: &str,
     form: &[(&str, &str)],
-) -> Result<(u16, String), String> {
+) -> Result<(u16, String, Option<u64>), String> {
     let resp = client
         .post(endpoint)
         .header("Accept", "application/json")
@@ -105,8 +117,9 @@ async fn post_form_via(
         .await
         .map_err(|e| format!("网络错误: {}", e))?;
     let status = resp.status().as_u16();
+    let retry_after = resp.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
     let text = read_capped_body(resp, 1024 * 1024).await?;
-    Ok((status, text))
+    Ok((status, text, retry_after))
 }
 
 /// POST JSON with Bearer auth and an optional User-Agent override
@@ -116,7 +129,7 @@ pub async fn post_json_ua(
     token: &str,
     user_agent: Option<&str>,
     body: &Value,
-) -> Result<(u16, String), String> {
+) -> Result<(u16, String, Option<u64>), String> {
     let client = http_client();
     let mut req = client
         .post(endpoint)
@@ -131,8 +144,9 @@ pub async fn post_json_ua(
         .await
         .map_err(|e| format!("网络错误: {}", e))?;
     let status = resp.status().as_u16();
+    let retry_after = resp.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
     let text = read_capped_body(resp, 1024 * 1024).await?;
-    Ok((status, text))
+    Ok((status, text, retry_after))
 }
 
 /// Read response body with a maximum byte limit (1MB default).
@@ -169,7 +183,7 @@ pub async fn verify_custom(
     def: &crate::settings::CustomProvider,
     key: &str,
 ) -> Result<String, String> {
-    let (status, body) =
+    let (status, body, _) =
         get_with_auth(&def.endpoint, &def.auth_header, &def.auth_prefix, key).await?;
     if status == 401 || status == 403 {
         return Err(format!("HTTP {} — key 无效或无权限", status));
@@ -209,6 +223,16 @@ mod tests {
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    #[test]
+    fn retry_after_seconds_dates_and_invalid_values() {
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1445412420);
+        assert_eq!(parse_retry_after("120", now), Some(120));
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT", now), Some(60));
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:26:00 GMT", now), Some(0));
+        assert_eq!(parse_retry_after("invalid", now), None);
+        assert_eq!(parse_retry_after("-1", now), None);
+    }
+
     /// Short-timeout client so timeout tests don't burn the 15s production budget.
     fn fast_client() -> reqwest::Client {
         reqwest::Client::builder()
@@ -229,7 +253,7 @@ mod tests {
             .mount(&server)
             .await;
         let url = format!("{}/quota", server.uri());
-        let (status, _) = get_with_auth(&url, "Authorization", "Bearer ", "test-key")
+        let (status, _, _) = get_with_auth(&url, "Authorization", "Bearer ", "test-key")
             .await
             .unwrap();
         assert_eq!(status, 200);
@@ -249,8 +273,9 @@ mod tests {
             .mount(&server)
             .await;
         let url = format!("{}/quota", server.uri());
-        let (status, body) = get_json(&url, &[]).await.unwrap();
+        let (status, body, retry_after) = get_json(&url, &[]).await.unwrap();
         assert_eq!(status, 429);
+        assert_eq!(retry_after, Some(30));
         assert!(body.contains("slow down"));
     }
 
@@ -264,7 +289,7 @@ mod tests {
             .mount(&server)
             .await;
         let url = format!("{}/big", server.uri());
-        let (status, body) = get_json(&url, &[]).await.unwrap();
+        let (status, body, _) = get_json(&url, &[]).await.unwrap();
         assert_eq!(status, 200);
         assert_eq!(body.len(), 1024 * 1024);
     }
