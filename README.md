@@ -171,10 +171,13 @@ reset 字段自动识别 epoch 秒/毫秒/RFC3339。接进来就和内置五家�
 
 ## 请作者喝咖啡
 
-如果这个工具帮你躲过了一次「心流被 429 掐死」的绝望瞬间，可以考虑请作者喝杯咖啡：
+如果这个工具帮你躲过了一次「心流被 429 掐死」的绝望瞬间，可以考虑请作者喝杯咖啡（悬浮条右键菜单里也有入口）：
 
+<!-- 赞赏码唯一事实源：src/sponsor.jpg（微信赞赏码，已裁剪至码本体）。
+     更换时同步更新 src-tauri/src/main.rs 测试里的 EXPECTED_SPONSOR_SHA256，
+     否则 cargo test 会红（这是防打包遗漏/防偷换的钉子）。 -->
 <p align="center">
-  <img src="docs/sponsor.jpg" width="280" alt="赞赏码" />
+  <img src="src/sponsor.jpg" width="280" alt="微信赞赏码" />
 </p>
 
 <p align="center"><i>给码农买杯咖啡，是他的福报。</i></p>

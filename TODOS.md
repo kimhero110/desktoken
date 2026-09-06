@@ -12,6 +12,7 @@
 - [x] ~~Antigravity provider~~（已完成 2026-09-02：Gemini provider 内置 Antigravity 通道——凭据管理器只读 + daily-cloudcode-pa fetchAvailableModels + UA 门禁）
 
 ## 工程遗留（低优先级但已知）
+- [ ] macOS `is_zh_locale` 对 Finder 启动的 GUI 应用不可靠（无 LANG/LC_ALL → 中文用户见英文菜单）：改走 NSLocale/CFLocale（2026-09-06 autoplan eng 评审发现，预存 bug）
 - [ ] OAuth 写回后 re-apply 原文件显式 ACL（当前各家 CLI 未设显式 ACL，无害；协议文档已标注）
 - [ ] 版本检查自定义源：ghproxy 镜像或自建 CDN manifest（国内可达性）
 - [ ] 完整签名 auto-updater（tauri-plugin-updater + 证书；定位升级为对外分发产品时再做）

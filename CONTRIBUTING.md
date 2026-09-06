@@ -39,6 +39,7 @@ cargo test          # 提交前必须全绿（49+ 个 fixture/协议/对抗测�
 
 - 日志与诊断输出必须过 `diagnostics.rs` 的脱敏层，别自己 `println!` token
 - 凭据读取集中走 `credentials.rs` / `oauth.rs`；新增外域凭据读取请在 PR 里单独说明
+- **赞赏码**：唯一事实源是 `src/sponsor.jpg`。更换它必须同步更新 `src-tauri/src/main.rs` 测试中的 `EXPECTED_SPONSOR_SHA256`，否则 `cargo test` 会红——这颗钉子既防打包遗漏，也防有人 PR 偷换收款码
 
 ## 讨论
 

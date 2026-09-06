@@ -5,17 +5,27 @@
 
 /// UI language detection for the tray menu. On Windows, env LANG is usually
 /// unset — ask the OS for the user's UI language instead (LANG_CHINESE = 0x04).
+/// Pure helpers split out for unit tests (T3).
+fn langid_is_chinese(langid: u16) -> bool {
+    langid & 0x3FF == 0x04
+}
+
+fn lang_str_is_chinese(lang: &str) -> bool {
+    lang.to_lowercase().starts_with("zh")
+}
+
+// NOTE (known gap, see TODOS.md): on macOS, GUI apps launched from Finder have
+// no LANG/LC_ALL — this falls back to English for Chinese macOS users.
 #[cfg(target_os = "windows")]
 fn is_zh_locale() -> bool {
     let langid = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
-    langid & 0x3FF == 0x04
+    langid_is_chinese(langid)
 }
 
 #[cfg(not(target_os = "windows"))]
 fn is_zh_locale() -> bool {
-    let lang = std::env::var("LANG").unwrap_or_default().to_lowercase();
-    let sys_lang = std::env::var("LC_ALL").unwrap_or_default().to_lowercase();
-    lang.starts_with("zh") || sys_lang.starts_with("zh")
+    lang_str_is_chinese(&std::env::var("LANG").unwrap_or_default())
+        || lang_str_is_chinese(&std::env::var("LC_ALL").unwrap_or_default())
 }
 mod settings;
 mod credentials;
@@ -207,18 +217,43 @@ fn trigger_refresh() -> bool {
     true
 }
 
+/// Menu item ids — single source of truth. build_app_menu() and
+/// handle_menu_event() both use these; test menu_ids_all_handled guards sync.
+const MENU_REFRESH: &str = "refresh";
+const MENU_MINI_MODE: &str = "mini_mode";
+const MENU_DIAG: &str = "diag";
+const MENU_CHECK_UPDATE: &str = "check_update";
+const MENU_REPORT: &str = "report";
+const MENU_SPONSOR: &str = "sponsor";
+const MENU_SETTINGS: &str = "settings";
+const MENU_QUIT: &str = "quit";
+
+fn menu_ids() -> [&'static str; 8] {
+    [
+        MENU_REFRESH,
+        MENU_MINI_MODE,
+        MENU_DIAG,
+        MENU_CHECK_UPDATE,
+        MENU_REPORT,
+        MENU_SPONSOR,
+        MENU_SETTINGS,
+        MENU_QUIT,
+    ]
+}
+
 fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let refresh = MenuItemBuilder::with_id("refresh", if is_zh_locale() { "立即刷新" } else { "Refresh Now" })
+    let refresh = MenuItemBuilder::with_id(MENU_REFRESH, if is_zh_locale() { "立即刷新" } else { "Refresh Now" })
         .enabled(!refresh_cooling_down())
         .build(app)?;
-    let mini = CheckMenuItemBuilder::with_id("mini_mode", if is_zh_locale() { "迷你模式" } else { "Mini Mode" })
+    let mini = CheckMenuItemBuilder::with_id(MENU_MINI_MODE, if is_zh_locale() { "迷你模式" } else { "Mini Mode" })
         .checked(settings::load().mini_mode)
         .build(app)?;
-    let diag = MenuItemBuilder::with_id("diag", if is_zh_locale() { "复制诊断信息" } else { "Copy Diagnostics" }).build(app)?;
-    let check_update = MenuItemBuilder::with_id("check_update", if is_zh_locale() { "检查更新" } else { "Check for Updates" }).build(app)?;
-    let report = MenuItemBuilder::with_id("report", if is_zh_locale() { "在 GitHub 报告问题" } else { "Report Issue on GitHub" }).build(app)?;
-    let settings_item = MenuItemBuilder::with_id("settings", if is_zh_locale() { "设置..." } else { "Settings..." }).build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", if is_zh_locale() { "退出" } else { "Quit" }).build(app)?;
+    let diag = MenuItemBuilder::with_id(MENU_DIAG, if is_zh_locale() { "复制诊断信息" } else { "Copy Diagnostics" }).build(app)?;
+    let check_update = MenuItemBuilder::with_id(MENU_CHECK_UPDATE, if is_zh_locale() { "检查更新" } else { "Check for Updates" }).build(app)?;
+    let report = MenuItemBuilder::with_id(MENU_REPORT, if is_zh_locale() { "在 GitHub 报告问题" } else { "Report Issue on GitHub" }).build(app)?;
+    let sponsor = MenuItemBuilder::with_id(MENU_SPONSOR, if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" }).build(app)?;
+    let settings_item = MenuItemBuilder::with_id(MENU_SETTINGS, if is_zh_locale() { "设置..." } else { "Settings..." }).build(app)?;
+    let quit = MenuItemBuilder::with_id(MENU_QUIT, if is_zh_locale() { "退出" } else { "Quit" }).build(app)?;
     MenuBuilder::new(app)
         .items(&[
             &refresh,
@@ -228,6 +263,7 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
             &diag,
             &check_update,
             &report,
+            &sponsor,
             &settings_item,
             &PredefinedMenuItem::separator(app)?,
             &quit,
@@ -237,9 +273,9 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tau
 
 fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
     match id {
-        "quit" => app.exit(0),
-        "settings" => open_settings_window(app),
-        "mini_mode" => {
+        MENU_QUIT => app.exit(0),
+        MENU_SETTINGS => open_settings_window(app),
+        MENU_MINI_MODE => {
             if let Some(w) = app.get_webview_window("main") {
                 let now_mini = settings::edit(|s| {
                     s.mini_mode = !s.mini_mode;
@@ -248,10 +284,10 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
                 set_mini_mode(&w, now_mini);
             }
         }
-        "refresh" => {
+        MENU_REFRESH => {
             trigger_refresh();
         }
-        "diag" => {
+        MENU_DIAG => {
             let text = diagnostics::collect(&poller::last_states());
             use tauri_plugin_clipboard_manager::ClipboardExt;
             let ok = app.clipboard().write_text(text).is_ok();
@@ -263,16 +299,17 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
                 .body(if ok { "诊断信息已复制（已脱敏）" } else { "复制失败" })
                 .show();
         }
-        "check_update" => {
+        MENU_CHECK_UPDATE => {
             updater_check::maybe_check(app.clone(), true);
         }
-        "report" => {
+        MENU_REPORT => {
             use tauri_plugin_opener::OpenerExt;
             let _ = app.opener().open_url(
                 "https://github.com/kimhero110/desktoken/issues/new/choose",
                 None::<&str>,
             );
         }
+        MENU_SPONSOR => open_sponsor_window(app),
         _ => {}
     }
 }
@@ -297,22 +334,78 @@ fn get_settings() -> Settings {
 // version checks). The bar stays hidden and the poller stays off until the
 // user explicitly agrees in the ToS window.
 // ---------------------------------------------------------------------------
-fn open_tos_window(app: &tauri::AppHandle) {
-    if app.get_webview_window("tos").is_some() {
+/// One builder for all secondary singleton windows (tos/settings/sponsor).
+/// - Existing instance: focus (or no-op for tos) and return.
+//  - Build failure: logged, not swallowed (eng review E3).
+/// - Position: centered on the monitor the floating bar lives on, falling back
+///   to the primary monitor when the bar doesn't exist yet (tos at first run).
+struct SingletonWindowSpec {
+    label: &'static str,
+    url: &'static str,
+    title: String,
+    size: (f64, f64),
+    always_on_top: bool,
+    skip_taskbar: bool,
+    minimizable: bool,
+    focus_existing: bool,
+}
+
+fn open_singleton_window(app: &tauri::AppHandle, spec: SingletonWindowSpec) {
+    if let Some(w) = app.get_webview_window(spec.label) {
+        if spec.focus_existing {
+            let _ = w.set_focus();
+        }
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, "tos", WebviewUrl::App("tos.html".into()))
-        .title("QuotaBar — 使用前请知悉")
-        .inner_size(380.0, 300.0)
+    let mut b = WebviewWindowBuilder::new(app, spec.label, WebviewUrl::App(spec.url.into()));
+    b = b
+        .title(&spec.title)
+        .inner_size(spec.size.0, spec.size.1)
         .resizable(false)
         .maximizable(false)
-        .minimizable(false)
-        .always_on_top(true)
-        .skip_taskbar(false)
+        .minimizable(spec.minimizable)
+        .always_on_top(spec.always_on_top)
+        .skip_taskbar(spec.skip_taskbar)
         .decorations(true)
-        .center()
-        .focused(true)
-        .build();
+        .focused(true);
+    match b.build() {
+        Ok(w) => {
+            // center on the bar's monitor; else default center
+            let bar_monitor = app
+                .get_webview_window("main")
+                .and_then(|m| m.current_monitor().ok().flatten());
+            if let (Some(mon), Ok(ws)) = (bar_monitor, w.outer_size()) {
+                let mp = mon.position();
+                let ms = mon.size();
+                let x = mp.x + (ms.width as i32 - ws.width as i32) / 2;
+                let y = mp.y + (ms.height as i32 - ws.height as i32) / 2;
+                let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+            } else {
+                let _ = w.center();
+            }
+        }
+        Err(e) => rustlog(format!("open window {} failed: {}", spec.label, e)),
+    }
+}
+
+fn open_tos_window(app: &tauri::AppHandle) {
+    open_singleton_window(
+        app,
+        SingletonWindowSpec {
+            label: "tos",
+            url: "tos.html",
+            title: if is_zh_locale() {
+                "QuotaBar — 使用前请知悉".into()
+            } else {
+                "QuotaBar — Before You Start".into()
+            },
+            size: (380.0, 300.0),
+            always_on_top: true,
+            skip_taskbar: false,
+            minimizable: false,
+            focus_existing: false,
+        },
+    );
 }
 
 #[tauri::command]
@@ -547,21 +640,43 @@ fn autosize(window: WebviewWindow, height: f64, width: Option<f64>) {
 // Settings window (minimal, live-apply)
 // ---------------------------------------------------------------------------
 fn open_settings_window(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("settings") {
-        let _ = w.set_focus();
-        return;
-    }
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
-        .title("QuotaBar 设置")
-        .inner_size(480.0, 560.0)
-        .resizable(false)
-        .maximizable(false)
-        .always_on_top(false)
-        .skip_taskbar(false)
-        .decorations(true)
-        .center()
-        .focused(true)
-        .build();
+    open_singleton_window(
+        app,
+        SingletonWindowSpec {
+            label: "settings",
+            url: "settings.html",
+            title: if is_zh_locale() {
+                "QuotaBar 设置".into()
+            } else {
+                "QuotaBar Settings".into()
+            },
+            size: (480.0, 560.0),
+            always_on_top: false,
+            skip_taskbar: false,
+            minimizable: true,
+            focus_existing: true,
+        },
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sponsor window (quiet corner: shows the tip QR, never nags)
+// ---------------------------------------------------------------------------
+fn open_sponsor_window(app: &tauri::AppHandle) {
+    open_singleton_window(
+        app,
+        SingletonWindowSpec {
+            label: "sponsor",
+            url: "sponsor.html",
+            title: if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" }.into(),
+            size: (300.0, 430.0),
+            always_on_top: false,
+            // momentary window: no taskbar slot
+            skip_taskbar: true,
+            minimizable: true,
+            focus_existing: true,
+        },
+    );
 }
 
 #[tauri::command]
@@ -862,4 +977,77 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running DeskToken");
+}
+
+// ---------------------------------------------------------------------------
+// Tests (autoplan sponsor review: T1 menu-id sync, T2 QR pin, T3 locale)
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// T1: every id the menu builds must have a handler branch. A typo in a
+    /// string literal id compiles fine and produces a dead menu item — this
+    /// test is the only thing standing between that and the user.
+    #[test]
+    fn menu_ids_all_handled() {
+        // handler dispatch is a match over these consts; list them explicitly
+        // so adding an id to menu_ids() without a handler branch fails here
+        let handled = [
+            MENU_REFRESH,
+            MENU_MINI_MODE,
+            MENU_DIAG,
+            MENU_CHECK_UPDATE,
+            MENU_REPORT,
+            MENU_SPONSOR,
+            MENU_SETTINGS,
+            MENU_QUIT,
+        ];
+        for id in menu_ids() {
+            assert!(handled.contains(&id), "menu id '{id}' has no handler branch");
+        }
+    }
+
+    /// T2: the tip QR is a payment target — pin its hash so a packaging miss
+    /// or a PR swapping in an attacker's QR fails the build, not the user.
+    /// 若你是有意更换赞赏码：同步更新下面的 EXPECTED_SPONSOR_SHA256
+    /// （对 src/sponsor.jpg 跑 `Get-FileHash -Algorithm SHA256` 或 `shasum -a 256`）。
+    #[test]
+    fn sponsor_qr_pinned() {
+        use sha2::Digest;
+        const EXPECTED_SPONSOR_SHA256: &str =
+            "edee5f8fe3665aeebb8b8098d06e2e3ca528a992d54bd37616f4842080a1f2bb";
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("src")
+            .join("sponsor.jpg");
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| {
+            panic!("sponsor.jpg 缺失或不可读（{}）：打包会裂图。文件应位于 src/sponsor.jpg", e)
+        });
+        let hash = format!("{:x}", sha2::Sha256::digest(&bytes));
+        assert_eq!(
+            hash, EXPECTED_SPONSOR_SHA256,
+            "sponsor.jpg 哈希变了——若你是有意更换赞赏码，请同步更新本测试的 EXPECTED_SPONSOR_SHA256；否则这是一次可疑替换"
+        );
+    }
+
+    /// T3: locale helpers — primary-language-tag matching on both paths.
+    #[test]
+    fn langid_chinese_detection() {
+        assert!(langid_is_chinese(0x0804)); // zh-CN
+        assert!(langid_is_chinese(0x0404)); // zh-TW
+        assert!(langid_is_chinese(0x0C04)); // zh-HK
+        assert!(!langid_is_chinese(0x0409)); // en-US
+        assert!(!langid_is_chinese(0x0411)); // ja-JP
+    }
+
+    #[test]
+    fn lang_str_chinese_detection() {
+        assert!(lang_str_is_chinese("zh_CN.UTF-8"));
+        assert!(lang_str_is_chinese("ZH-TW"));
+        assert!(lang_str_is_chinese("zh"));
+        assert!(!lang_str_is_chinese("en_US.UTF-8"));
+        assert!(!lang_str_is_chinese(""));
+        assert!(!lang_str_is_chinese("azazel")); // starts_with("zh") only
+    }
 }
