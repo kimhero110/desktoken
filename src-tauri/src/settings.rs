@@ -158,6 +158,13 @@ static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn save(s: &Settings) -> std::io::Result<()> {
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    save_locked(s)
+}
+
+/// Write without taking WRITE_LOCK — caller must hold it. (edit() holds the
+/// lock across read-modify-write; Mutex is not reentrant, so routing edit()
+/// through save() self-deadlocked — regression test: edit_roundtrip.)
+fn save_locked(s: &Settings) -> std::io::Result<()> {
     let path = settings_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -187,6 +194,28 @@ pub fn edit<R>(f: impl FnOnce(&mut Settings) -> R) -> R {
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = load();
     let r = f(&mut s);
-    let _ = save(&s);
+    let _ = save_locked(&s);
     r
+}
+
+#[cfg(test)]
+mod tests {
+    /// Regression: ba6de99 made both edit() and save() take the non-reentrant
+    /// WRITE_LOCK; edit() calling save() self-deadlocked, so every successful
+    /// provider poll froze before emit and the bar never updated. Fail fast
+    /// instead of hanging the suite if this ever comes back.
+    #[test]
+    fn edit_roundtrip_no_deadlock() {
+        let h = std::thread::spawn(|| super::edit(|s| s.opacity));
+        let start = std::time::Instant::now();
+        while !h.is_finished() {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "settings::edit deadlocked — WRITE_LOCK reentrancy regression"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let opacity = h.join().unwrap();
+        assert!(opacity > 0.0);
+    }
 }
