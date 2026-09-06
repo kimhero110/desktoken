@@ -10,6 +10,7 @@ fn langid_is_chinese(langid: u16) -> bool {
     langid & 0x3FF == 0x04
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))] // used on macOS/Linux + tests
 fn lang_str_is_chinese(lang: &str) -> bool {
     lang.to_lowercase().starts_with("zh")
 }
@@ -228,6 +229,7 @@ const MENU_SPONSOR: &str = "sponsor";
 const MENU_SETTINGS: &str = "settings";
 const MENU_QUIT: &str = "quit";
 
+#[cfg(test)] // consumed by tests::menu_ids_all_handled
 fn menu_ids() -> [&'static str; 8] {
     [
         MENU_REFRESH,
@@ -669,7 +671,7 @@ fn open_sponsor_window(app: &tauri::AppHandle) {
             label: "sponsor",
             url: "sponsor.html",
             title: if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" }.into(),
-            size: (300.0, 430.0),
+            size: (224.0, 264.0),
             always_on_top: false,
             // momentary window: no taskbar slot
             skip_taskbar: true,
