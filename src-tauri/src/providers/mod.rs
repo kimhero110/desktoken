@@ -63,7 +63,7 @@ impl QuotaSnapshot {
             source: "official".into(),
             fetched_at: now_secs(),
             stale_after_secs: 600,
-            error: Some(e.short_msg().into()),
+            error: Some(e.short_msg().into_owned()),
         }
     }
 }
@@ -79,6 +79,10 @@ pub enum ProviderError {
     CredentialCorrupt { torn: bool },
     ParseFailed,
     Network,
+    /// Non-2xx response from a live server (not auth/rate-limit) — e.g. a
+    /// custom-monitor URL that is an API base URL instead of the full quota
+    /// endpoint (404 + HTML). Transport-level failures stay `Network`.
+    EndpointStatus { code: u16 },
     Internal,
     UnsupportedClient,
     /// Antigravity IDE (language server) not running — Gemini via IDE channel
@@ -87,18 +91,22 @@ pub enum ProviderError {
 
 impl ProviderError {
     /// in-row short message, <= 28 chars (design spec: error text mapping table)
-    pub fn short_msg(&self) -> &'static str {
+    pub fn short_msg(&self) -> std::borrow::Cow<'static, str> {
+        use std::borrow::Cow;
         match self {
-            ProviderError::RateLimited { .. } => "限流中，稍后自动重试",
-            ProviderError::AuthExpired => "凭据失效，请重新登录",
-            ProviderError::CredentialMissing => "未配置凭据",
-            ProviderError::CredentialCorrupt { torn: true } => "读取冲突，自动恢复中",
-            ProviderError::CredentialCorrupt { torn: false } => "凭据损坏，请重新登录",
-            ProviderError::ParseFailed => "接口变更，请检查更新",
-            ProviderError::Network => "网络无法连接",
-            ProviderError::Internal => "平台处理异常，稍后自动重试",
-            ProviderError::UnsupportedClient => "暂不支持，可在设置中停用",
-            ProviderError::IdeNotRunning => "Antigravity 未运行",
+            ProviderError::RateLimited { .. } => Cow::Borrowed("限流中，稍后自动重试"),
+            ProviderError::AuthExpired => Cow::Borrowed("凭据失效，请重新登录"),
+            ProviderError::CredentialMissing => Cow::Borrowed("未配置凭据"),
+            ProviderError::CredentialCorrupt { torn: true } => Cow::Borrowed("读取冲突，自动恢复中"),
+            ProviderError::CredentialCorrupt { torn: false } => Cow::Borrowed("凭据损坏，请重新登录"),
+            ProviderError::ParseFailed => Cow::Borrowed("接口变更，请检查更新"),
+            ProviderError::Network => Cow::Borrowed("网络无法连接"),
+            ProviderError::EndpointStatus { code } => {
+                Cow::Owned(format!("接口异常 HTTP {}，请检查端点", code))
+            }
+            ProviderError::Internal => Cow::Borrowed("平台处理异常，稍后自动重试"),
+            ProviderError::UnsupportedClient => Cow::Borrowed("暂不支持，可在设置中停用"),
+            ProviderError::IdeNotRunning => Cow::Borrowed("Antigravity 未运行"),
         }
     }
 }
