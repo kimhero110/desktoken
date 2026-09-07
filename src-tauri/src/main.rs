@@ -23,8 +23,76 @@ fn is_zh_locale() -> bool {
     langid_is_chinese(langid)
 }
 
-#[cfg(not(target_os = "windows"))]
+/// Preferred UI languages, first preference first (e.g. "zh-Hans-CN").
+/// GUI apps launched from Finder have no LANG/LC_ALL, so ask CoreFoundation.
+#[cfg(target_os = "macos")]
+fn preferred_languages() -> Vec<String> {
+    use std::ffi::c_void;
+
+    type CFArrayRef = *const c_void;
+    type CFStringRef = *const c_void;
+    const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFLocaleCopyPreferredLanguages() -> CFArrayRef;
+        fn CFArrayGetCount(array: CFArrayRef) -> isize;
+        fn CFArrayGetValueAtIndex(array: CFArrayRef, idx: isize) -> CFStringRef;
+        fn CFStringGetCString(
+            the_string: CFStringRef,
+            buffer: *mut u8,
+            buffer_size: isize,
+            encoding: u32,
+        ) -> bool;
+        fn CFRelease(cf: *const c_void);
+    }
+
+    let mut out = Vec::new();
+    unsafe {
+        let langs = CFLocaleCopyPreferredLanguages();
+        if langs.is_null() {
+            return out;
+        }
+        let count = CFArrayGetCount(langs);
+        for i in 0..count {
+            let s = CFArrayGetValueAtIndex(langs, i);
+            if s.is_null() {
+                continue;
+            }
+            let mut buf = [0u8; 96];
+            let ok = CFStringGetCString(
+                s,
+                buf.as_mut_ptr(),
+                buf.len() as isize,
+                K_CF_STRING_ENCODING_UTF8,
+            );
+            if ok {
+                let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+                if let Ok(v) = std::str::from_utf8(&buf[..len]) {
+                    out.push(v.to_string());
+                }
+            }
+        }
+        CFRelease(langs);
+    }
+    out
+}
+
+#[cfg(target_os = "macos")]
 fn is_zh_locale() -> bool {
+    preferred_languages()
+        .iter()
+        .any(|l| lang_str_is_chinese(l))
+        || env_lang_is_chinese()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn is_zh_locale() -> bool {
+    env_lang_is_chinese()
+}
+
+#[cfg_attr(target_os = "windows", allow(dead_code))] // Windows asks the OS directly
+fn env_lang_is_chinese() -> bool {
     lang_str_is_chinese(&std::env::var("LANG").unwrap_or_default())
         || lang_str_is_chinese(&std::env::var("LC_ALL").unwrap_or_default())
 }
@@ -1227,6 +1295,20 @@ mod tests {
         for id in menu_ids() {
             assert!(handled.contains(&id), "menu id '{id}' has no handler branch");
         }
+    }
+
+    /// T3: Finder-launched GUI apps have no LANG/LC_ALL, so macOS reads the
+    /// preferred-language list instead. Pin the string shape CFLocale returns
+    /// ("zh-Hans-CN", "en-US", ...) — this is what lang_str_is_chinese() sees.
+    #[test]
+    fn chinese_language_tags_are_detected() {
+        for tag in ["zh", "zh-Hans", "zh-Hans-CN", "zh_CN", "ZH-HANT-TW", "zh-TW"] {
+            assert!(lang_str_is_chinese(tag), "'{tag}' should read as Chinese");
+        }
+        for tag in ["en-US", "en", "ja-JP", ""] {
+            assert!(!lang_str_is_chinese(tag), "'{tag}' should not read as Chinese");
+        }
+        assert!(langid_is_chinese(0x0804)); // zh-CN primary langid
     }
 
     /// T2: the tip QR is a payment target — pin its hash so a packaging miss
