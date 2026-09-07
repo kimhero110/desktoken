@@ -29,6 +29,9 @@ fn is_zh_locale() -> bool {
         || lang_str_is_chinese(&std::env::var("LC_ALL").unwrap_or_default())
 }
 mod settings;
+mod task_monitor;
+mod task_integration;
+mod task_install;
 mod credentials;
 mod diagnostics;
 mod fetch;
@@ -989,11 +992,28 @@ async fn verify_provider(provider_id: String, custom_id: Option<String>) -> Resu
 
 // ---------------------------------------------------------------------------
 fn main() {
+    if task_integration::handle_cli() { return; }
+    if task_monitor::handle_cli() { return; }
     // AUMID: makes Windows toasts attributable to QuotaBar (E5/M5).
     #[cfg(target_os = "windows")]
     unsafe {
         let wide: Vec<u16> = "com.quotabar.app\0".encode_utf16().collect();
         windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(wide.as_ptr());
+    }
+
+    // Explicit one-shot notification test; no windows, quota polling or settings edits.
+    if std::env::args().nth(1).as_deref() == Some("task-test-notification") {
+        tauri::Builder::default().plugin(tauri_plugin_notification::init()).setup(|app| {
+            let app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let result = task_monitor::test_task_notification(app.clone());
+                println!("{}", serde_json::json!({"submitted":result.is_ok(),"error":result.as_ref().err()}));
+                app.exit(if result.is_ok() { 0 } else { 1 });
+            });
+            Ok(())
+        }).run(tauri::generate_context!()).expect("notification self-test runtime failed");
+        return;
     }
 
     tauri::Builder::default()
@@ -1007,6 +1027,12 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            task_monitor::list_tasks,
+            task_monitor::set_task_notifications,
+            task_monitor::test_task_notification,
+            task_integration::task_integration_config,
+            task_integration::task_integration_status,
+            task_install::set_task_integration,
             context_menu,
             get_settings,
             accept_tos,
@@ -1036,6 +1062,7 @@ fn main() {
             updater_check::current_version,
         ])
         .setup(|app| {
+            task_monitor::start(app.handle().clone());
             let s = settings::load();
 
             let mut wb = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

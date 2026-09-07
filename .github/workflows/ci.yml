@@ -27,3 +27,8 @@ jobs:
         run: |
           cd src-tauri
           cargo build --locked
+      - name: Native task lifecycle (isolated, no accounts required)
+        timeout-minutes: 3
+        run: |
+          node scripts/test-task-bridge.cjs
+          node scripts/test-task-lifecycle.cjs

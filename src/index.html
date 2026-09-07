@@ -90,6 +90,13 @@
   body.mini #bar > .provider, body.mini #bar > #empty, body.mini #bar > #notice, body.mini #bar > #updatebar, body.mini #bar > #detail { display: none !important; }
   body.mini #bar { padding: 0 10px; }
   body.mini #strip { display: block; }
+  body.mini #providers, body.mini #tabs, body.mini #tasks { display: none !important; }
+  #tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  #tabs button { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 3px 8px; cursor: pointer; font: inherit; font-size: 11px; }
+  #tabs button[aria-pressed=true] { color: var(--text); border-color: #58a6ff; }
+  #tasks { display: none; max-height: 460px; overflow-y: auto; cursor: default; }
+  .task { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+  .task-meta { color: var(--text-dim); font-size: 10px; margin-top: 4px; overflow-wrap: anywhere; }
 
   /* ---- detail panel (left-click toggles; Mac menu-bar convention) ---- */
   #detail {
@@ -123,6 +130,8 @@
   <div id="strip"><span class="dot" id="strip-dot"></span><span id="strip-title">QuotaBar</span><span id="strip-worst"></span><span id="strip-msg"></span></div>
   <div id="updatebar"><span class="x" id="up-x">×</span><span id="up-text"></span> <a href="#" id="up-view">查看</a> · <span class="skip" id="up-skip">跳过此版本</span></div>
   <div id="notice"></div>
+  <div id="tabs"><button id="quota-tab" aria-pressed="true">额度</button><button id="task-tab" aria-pressed="false">本机任务</button></div>
+  <div id="tasks" aria-live="polite"></div>
   <div id="empty">
     <div class="t1" id="empty-t1">还没有配置任何平台</div>
     <div class="t2" id="empty-t2">右键 → 设置，添加或启用平台</div>
@@ -131,6 +140,7 @@
   <div id="detail"></div>
 </div>
 <script src="quota-state.js"></script>
+<script src="task-state.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core;
   const listen = window.__TAURI__.event.listen;
@@ -141,6 +151,7 @@
   const snapshots = new Map(); // provider_id -> snapshot
   const prevResets = new Map(); // "id/label" -> last resets_at (for reset flash)
   const pendingInit = new Set(); // provider ids awaiting their first snapshot
+  let tasks = [], taskView = false;
 
   // ---- i18n (system language; backend error text arrives ready-to-show) ----
   const isZh = (navigator.language || '').startsWith('zh');
@@ -167,6 +178,40 @@
   document.getElementById("strip-title").textContent = I18N.stripTitle;
   document.getElementById("empty-t1").textContent = I18N.emptyT1;
   document.getElementById("empty-t2").textContent = I18N.emptyT2;
+  document.getElementById('quota-tab').textContent = isZh ? '额度' : 'Quota';
+  document.getElementById('task-tab').textContent = isZh ? '本机任务' : 'Local tasks';
+  function renderTasks() {
+    const el = document.getElementById('tasks');
+    el.innerHTML = '';
+    el.style.display = taskView ? 'block' : 'none';
+    providersEl.style.display = taskView ? 'none' : '';
+    if (taskView) { emptyEl.style.display = 'none'; detailEl.style.display = 'none'; }
+    else detailEl.style.display = '';
+    document.getElementById('quota-tab').setAttribute('aria-pressed', String(!taskView));
+    document.getElementById('task-tab').setAttribute('aria-pressed', String(taskView));
+    if (!tasks.length) {
+      el.textContent = isZh ? '尚未收到本机事件。右键 → 设置 → 本机任务，配置接入后开始一轮任务。' : 'No local events yet. Set up an integration in Settings, then start a turn.';
+      el.className = 'task-meta';
+    } else {
+      el.className = '';
+      for (const task of tasks) {
+        const row = document.createElement('div'); row.className = 'task';
+        const head = document.createElement('div');
+        head.textContent = `${task.tool} · ${taskLabel(task.state, isZh)}`;
+        head.style.color = taskColor(task.state);
+        const meta = document.createElement('div'); meta.className = 'task-meta';
+        meta.textContent = `${task.project || '—'} · ${task.session_id.slice(0, 8)} · ${fmtFresh(task.updated_at / 1000, false)}`;
+        row.appendChild(head); row.appendChild(meta); el.appendChild(row);
+      }
+    }
+    const attention = taskSummary(tasks, isZh);
+    if (attention) {
+      document.getElementById('strip-dot').style.background = '#D29922';
+      bar.style.borderColor = '#D29922';
+    }
+  }
+  document.getElementById('quota-tab').addEventListener('click', () => { taskView = false; render(); });
+  document.getElementById('task-tab').addEventListener('click', () => { taskView = true; render(); });
 
   const OFFICIAL = {
     kimi: "https://platform.moonshot.cn/console",
@@ -282,6 +327,7 @@
       sw.textContent = "";
     }
     renderDetail();
+    renderTasks();
     refit();
   }
 
@@ -379,6 +425,9 @@
     "代码能跑就别动", "写注释是给自己留情面",
   ];
   function stripMessage() {
+    const attention = taskSummary(tasks, isZh);
+    if (attention) return attention;
+    if (taskView && tasks.length) return `${tasks[0].tool} · ${taskLabel(tasks[0].state, isZh)}`;
     const sug = suggestion();
     if (sug) return sug; // ≥90%: the joke yields to routing advice
     const now = new Date();
@@ -394,6 +443,17 @@
   }
 
   // ---- events ----
+  let taskRevision = 0;
+  Promise.resolve(listen('tasks://snapshot', ev => {
+    taskRevision++;
+    tasks = Array.isArray(ev.payload) ? ev.payload : [];
+    render();
+  })).then(() => {
+    const revision = taskRevision;
+    return invoke('list_tasks').then(value => {
+      if (revision === taskRevision) { tasks = Array.isArray(value) ? value : []; render(); }
+    });
+  }).catch(() => {});
   listen("quota://snapshot", (ev) => {
     const s = ev.payload;
     pendingInit.delete(s.provider_id);
@@ -467,6 +527,7 @@
   let downAt = null;
   bar.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
+    if (e.target.closest('button, a, #tasks')) return;
     downAt = { x: e.screenX, y: e.screenY, t: Date.now(), dragging: false };
   });
   window.addEventListener("mousemove", (e) => {

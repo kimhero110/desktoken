@@ -32,6 +32,8 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 ## 功能特性
 
+- **v0.4.0-beta.1 预览：本机任务状态**。额度 / 本机任务页签，展示工作、等待授权、等待输入、本轮结束、错误和未知；可选桌面通知。提供 Codex CLI、Claude Code、OpenCode V1 的接入配置预览、一键安装/移除、配置检查和测试通知；Windows 配置替换及备份保留原访问控制规则。OpenCode 已通过真实结束及授权等待联调，Windows 通知调用成功；其余工具和弹窗可见性仍待确认。**ChatGPT 桌面端未接入，Codex 桌面端未验证；CLI 配置不代表桌面端支持。**仅当前电脑，v0.3.2 稳定包不含此功能。[下载预览版](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.1)。见 [接入与状态边界](docs/task-monitor.md)。
+
 - **悬浮条常驻桌面**：半透明 acrylic、置顶、整面拖动、**永不抢焦点**——在 VS Code 里打字时拖它，光标纹丝不动（这是血泪换来的 `WS_EX_NOACTIVATE`，不是吹的）
 - **左键点一下，展开详情卡**：每窗口的已用/剩余、重置的准确时刻、套餐与数据来源、官方页面直达链接，外加 **7 日用量 sparkline**（本地 SQLite，哪都不去）
 - **5 小时窗口 + 每周窗口 + 重置倒计时**：`43m / 2.1h / 3d4h`，扫一眼就知道现在该猛用还是该省着
@@ -81,7 +83,7 @@ cargo tauri dev      # 开发模式
 cargo tauri build -- --locked    # 出安装包
 ```
 
-要求：Rust stable、Tauri CLI；Windows 构建还需要 MSVC C++ Build Tools 与 WebView2。前端运行和构建不依赖 Node；运行前端回归测试需要 Node.js 20+。
+要求：Rust stable（至少 1.89，安装器使用标准库文件锁）、Tauri CLI；Windows 构建还需要 MSVC C++ Build Tools 与 WebView2。前端运行和构建不依赖 Node；运行前端回归测试需要 Node.js 20+。
 
 ## 首次运行
 

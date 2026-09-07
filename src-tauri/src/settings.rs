@@ -65,6 +65,8 @@ pub struct Settings {
     pub toast_alerted: std::collections::HashMap<String, i64>,
     #[serde(default)]
     pub autostart: bool,
+    #[serde(default)]
+    pub task_notifications: bool,
 }
 
 impl Default for Settings {
@@ -87,6 +89,7 @@ impl Default for Settings {
             latest_version: None,
             toast_alerted: Default::default(),
             autostart: false,
+            task_notifications: false,
         }
     }
 }
@@ -209,6 +212,14 @@ pub fn edit<R>(f: impl FnOnce(&mut Settings) -> R) -> R {
     let r = f(&mut s);
     let _ = save_locked(&s);
     r
+}
+
+/// Fallible settings edit for controls that must report persistence failures.
+pub fn try_edit(f: impl FnOnce(&mut Settings)) -> std::io::Result<()> {
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = load();
+    f(&mut s);
+    save_locked(&s)
 }
 
 #[cfg(test)]

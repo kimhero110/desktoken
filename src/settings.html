@@ -47,7 +47,7 @@
 </head>
 <body>
 <h1>QuotaBar Settings / 设置</h1>
-<div class="note">所有设置即时生效并自动保存。API key 仅存 Windows 凭据管理器，不写文件、不上传。</div>
+<div class="note">设置自动保存。API key 存入系统凭据管理器，查询额度时发送到对应平台。</div>
 
 <h2>外观</h2>
 <div class="field">
@@ -73,6 +73,25 @@
     <input type="checkbox" id="autostart" />
     <label for="autostart" style="margin:0">开机自动启动</label>
   </div>
+</div>
+
+<h2>本机任务 · 试验功能</h2>
+<div class="card">
+  <label><input type="checkbox" id="task-notifications" /> 桌面通知：等待授权、等待输入、本轮结束或异常</label>
+  <div class="note">仅监控当前电脑。先生成配置查看内容，再点击安装或手动合并，之后重启对应工具。安装会备份原文件并保留其他设置；不会批准工具操作。长时间无事件显示“状态未知”。</div>
+  <div class="row" style="margin-top:8px">
+    <select id="task-tool"><option value="codex">Codex CLI（需信任）</option><option value="claude">Claude Code</option><option value="opencode">OpenCode V1</option></select>
+    <button id="task-config">生成配置</button>
+  </div>
+  <div id="task-target" class="note" style="overflow-wrap:anywhere"></div>
+  <textarea id="task-snippet" rows="7" readonly aria-label="任务接入配置" style="margin-top:8px"></textarea>
+  <div class="row" style="margin-top:8px"><button id="task-install" disabled>安装接入</button><button id="task-remove" class="ghost" disabled>移除接入</button></div>
+  <div id="task-install-result" class="note" role="status" style="overflow-wrap:anywhere"></div>
+  <div class="note">配置绑定当前 QuotaBar 可执行文件路径，移动程序后需重新生成。ChatGPT 桌面端未接入；Codex 桌面端未验证。Kimi Code、OpenClaw、Antigravity 尚未接入。</div>
+  <div class="row" style="margin-top:8px"><button id="task-check" class="ghost">检查接入</button><button id="task-test-toast" class="ghost">发送测试通知</button></div>
+  <div id="task-health" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+  <div id="task-toast-result" class="note" role="status"></div>
+  <div class="note">仅检查默认配置目录。配置匹配不等于已经登录或获得 hook 信任；Codex 请在 /hooks 中审阅并信任配置。系统通知还受勿扰模式影响。</div>
 </div>
 
 <h2>平台凭据</h2>
@@ -115,6 +134,51 @@
 
 <script>
   const { invoke } = window.__TAURI__.core;
+  const taskConfigLabels = { missing:'未找到配置', unreadable:'配置不可读', invalid:'配置 JSON 无效', different:'未匹配当前接收器', partial:'仅部分事件匹配', matched:'仅配置匹配，不代表已生效；仍需确认信任和登录' };
+  async function checkTaskIntegration() {
+    try {
+      const entries = await invoke('task_integration_status');
+      document.getElementById('task-health').textContent = entries.map(x => `${x.tool}：${taskConfigLabels[x.config] || x.config}\n${x.path}\n${x.last_event_at ? '最近收到事件：'+new Date(x.last_event_at).toLocaleString() : '当前进程尚未收到近期事件'}`).join('\n\n');
+    } catch(error) { document.getElementById('task-health').textContent = String(error); }
+  }
+  document.getElementById('task-check').addEventListener('click', checkTaskIntegration);
+  document.getElementById('task-test-toast').addEventListener('click', async () => {
+    try { await invoke('test_task_notification'); document.getElementById('task-toast-result').textContent = '已提交给系统，请确认是否看到“QuotaBar · 测试通知”。'; }
+    catch(error) { document.getElementById('task-toast-result').textContent = '通知调用失败：'+String(error); }
+  });
+  invoke('get_settings').then(s => { document.getElementById('task-notifications').checked = !!s.task_notifications; });
+  document.getElementById('task-notifications').addEventListener('change', async e => {
+    try { await invoke('set_task_notifications', { enabled: e.target.checked }); }
+    catch (error) { e.target.checked = !e.target.checked; document.getElementById('task-target').textContent = String(error); }
+  });
+  document.getElementById('task-config').addEventListener('click', async () => {
+    const tool = document.getElementById('task-tool').value;
+    try {
+      const config = await invoke('task_integration_config', { tool });
+      if (document.getElementById('task-tool').value !== tool) return;
+      document.getElementById('task-target').textContent = `${config.target} — ${config.note}`;
+      document.getElementById('task-snippet').value = config.content;
+      document.getElementById('task-install').disabled = false;
+      document.getElementById('task-remove').disabled = false;
+    } catch (error) { document.getElementById('task-target').textContent = String(error); }
+  });
+  document.getElementById('task-tool').addEventListener('change', () => {
+    document.getElementById('task-install').disabled = true;
+    document.getElementById('task-remove').disabled = true;
+    document.getElementById('task-snippet').value = '';
+  });
+  async function changeTaskIntegration(installed) {
+    const tool = document.getElementById('task-tool').value;
+    for(const id of ['task-install','task-remove','task-config','task-tool']) document.getElementById(id).disabled = true;
+    try {
+      const result = await invoke('set_task_integration', {tool,installed});
+      document.getElementById('task-install-result').textContent = `${result.changed ? (installed ? '接入已安装，请重启对应工具。' : '接入已移除，请重启对应工具。') : '配置已是目标状态。'}${result.backup ? ' 原文件备份：'+result.backup : ''}${installed && tool==='codex' ? ' Codex 默认跳过未信任的 hook。请在 Codex CLI 输入 /hooks，审阅并信任这些条目后，重新打开 Codex 开始任务。' : ''}`;
+      await checkTaskIntegration();
+    } catch(error) { document.getElementById('task-install-result').textContent = String(error); }
+    finally { for(const id of ['task-install','task-remove','task-config','task-tool']) document.getElementById(id).disabled = false; }
+  }
+  document.getElementById('task-install').addEventListener('click', () => changeTaskIntegration(true));
+  document.getElementById('task-remove').addEventListener('click', () => changeTaskIntegration(false));
   const $ = (id) => document.getElementById(id);
 
   // ---- appearance ----
