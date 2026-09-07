@@ -15,7 +15,11 @@ pub async fn fetch_snapshot(def: &CustomProvider) -> Result<QuotaSnapshot, Provi
         200..=299 => {}
         401 | 403 => return Err(ProviderError::AuthExpired),
         429 => return Err(ProviderError::RateLimited { retry_after }),
-        _ => return Err(ProviderError::Network),
+        // Non-2xx from a live server: usually a wrong URL (e.g. an API base
+        // URL instead of the full quota endpoint) — NOT a network problem.
+        // Field diagnosis 2026-09-07: a /v1 base URL 404+HTML used to land
+        // here as Network ("网络无法连接") and sent debugging off-track.
+        _ => return Err(ProviderError::EndpointStatus { code: status }),
     }
     parse(&def, &body)
 }
@@ -186,14 +190,33 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn http_500_maps_to_network() {
+        async fn http_500_maps_to_endpoint_status() {
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .respond_with(ResponseTemplate::new(500))
                 .mount(&server)
                 .await;
             let r = fetch_snapshot(&mock_def(&server)).await;
-            assert!(matches!(r, Err(ProviderError::Network)));
+            assert!(matches!(r, Err(ProviderError::EndpointStatus { code: 500 })));
+        }
+
+        #[tokio::test]
+        async fn http_404_html_maps_to_endpoint_status_not_network() {
+            // Field diagnosis 2026-09-07: the user pasted an API base URL
+            // (https://host/v1) instead of the full quota endpoint. The server
+            // answered 404 + HTML, which used to be classified as Network
+            // ("网络无法连接") — an unreachable-server message for a reachable
+            // server with a wrong URL. Now it reports the status code.
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(
+                    ResponseTemplate::new(404)
+                        .set_body_string("<html><body>404 Not Found</body></html>"),
+                )
+                .mount(&server)
+                .await;
+            let r = fetch_snapshot(&mock_def(&server)).await;
+            assert!(matches!(r, Err(ProviderError::EndpointStatus { code: 404 })));
         }
     }
 }
