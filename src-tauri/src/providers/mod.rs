@@ -102,7 +102,7 @@ impl ProviderError {
             ProviderError::ParseFailed => Cow::Borrowed("接口变更，请检查更新"),
             ProviderError::Network => Cow::Borrowed("网络无法连接"),
             ProviderError::EndpointStatus { code } => {
-                Cow::Owned(format!("接口异常 HTTP {}，请检查端点", code))
+                Cow::Owned(format!("接口异常 HTTP {code}，请检查端点"))
             }
             ProviderError::Internal => Cow::Borrowed("平台处理异常，稍后自动重试"),
             ProviderError::UnsupportedClient => Cow::Borrowed("暂不支持，可在设置中停用"),
