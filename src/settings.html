@@ -103,6 +103,7 @@
 <div class="row" style="margin:6px 0 10px; flex-wrap:wrap;">
   <button class="ghost" data-tpl="moonshot-cn">Moonshot 余额（国内）</button>
   <button class="ghost" data-tpl="moonshot-ai">Moonshot 余额（国际）</button>
+  <button class="ghost" data-tpl="new-api">New API / one-api 消耗</button>
 </div>
 <div id="customs"></div>
 <div class="card">
@@ -279,6 +280,13 @@
       auth_header: "Authorization", auth_prefix: "Bearer ", poll: 5,
       windows: "余额消耗 | data.available_balance | 100 | | invert",
       hint: "Moonshot 开放平台官方余额接口（国际站，文档：platform.kimi.ai）。limit 里的 100 是参考充值额（美元），改成自己的；余额低于参考额 10% 时变红告警。注意 .cn 与 .ai 的 key 不通用。",
+    },
+    "new-api": {
+      name: "New API 消耗",
+      endpoint: "https://你的站点/v1/dashboard/billing/usage",
+      auth_header: "Authorization", auth_prefix: "Bearer ", poll: 5,
+      windows: "已用 | total_usage | 100 |",
+      hint: "one-api / New API 中转站（GET /v1/dashboard/billing/usage）。把端点里的「你的站点」替换成自己的域名（不要只填到 /v1，那会 404）。total_usage 是账户累计已消费金额（美元），没有重置窗口，所以第 4 段留空。limit 里的 100 是参考预算，改成自己的充值额，用掉 90% 变红告警。注意：本接口报的是「已用」，不要加 invert——Moonshot 模板报的是「余额」才需要 invert。",
     },
   };
   document.querySelectorAll("[data-tpl]").forEach(b => b.addEventListener("click", () => {
