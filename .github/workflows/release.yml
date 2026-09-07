@@ -71,6 +71,7 @@ jobs:
         with:
           name: 'QuotaBar ${{ github.ref_name }}'
           prerelease: ${{ contains(github.ref_name, '-') }}
+          draft: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
           body_path: docs/releases/${{ github.ref_name }}.md
           files: |
