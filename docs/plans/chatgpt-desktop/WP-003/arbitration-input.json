@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "id": "FND-WP003-R1-001",
+      "category": "qa",
+      "severity": "P3",
+      "status": "resolved",
+      "substantiated": true,
+      "affected_requirement_ids": [
+        "PR-02",
+        "PUI-08"
+      ],
+      "claim": "键盘验收中的折叠区数量与计划不一致，属于非阻断的测试清单修订。",
+      "evidence": [
+        "PLAN-v1.md §3：额度来源、已有工具默认折叠，诊断独立折叠；高级自定义来源还需明确展开编辑。",
+        "ACCEPTANCE.md PUI-08：列出“2折叠区”，同时要求不存在不可达控件或焦点丢失。",
+        "ACCEPTANCE-v2.md PUI-08",
+        "ACCEPTANCE-v3.md PUI-08; review-r2.json closure_checks"
+      ],
+      "inference": "至少三个独立折叠入口已明确；若执行者只勾选两个，可能漏掉诊断的展开状态/键盘检查。全控件可达要求已经覆盖底线，故不构成权限或Do准入阻断。",
+      "reproduction": "按PLAN §3逐项列出额度来源、已有工具、诊断，对比PUI-08的数量2；构造前两者键盘正常但诊断aria-expanded错误的实现，数量清单可能漏测。",
+      "recommendation": "将“2折叠区”改为“所有折叠区（至少额度来源、已有工具、诊断，含高级自定义展开入口）”，保持原来的全控件可达要求。",
+      "owner": "primary-agent",
+      "due": "D1前更新并重新冻结受影响验收文件",
+      "evidence_verification": {
+        "status": "verified",
+        "verified_by": "primary-agent",
+        "method": "Compared all declared collapsible entrances with revised PUI-08; whole-entrance coverage now explicit"
+      }
+    }
+  ],
+  "test_results": [
+    {
+      "id": "PLAN-STRUCTURE-FINAL",
+      "status": "passed",
+      "deterministic": true
+    }
+  ],
+  "dissent": []
+}

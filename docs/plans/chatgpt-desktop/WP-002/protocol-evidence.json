@@ -1,0 +1,63 @@
+{
+  "observedAt": "2026-09-08T01:41:57.8807899+08:00",
+  "source": "existing generated local protocol; not regenerated in WP-002",
+  "provenanceLimitation": "Exact generating executable hash not captured; current desktop equivalence unverified",
+  "files": [
+    {
+      "file": "ThreadStatus.ts",
+      "sha256": "374F9EA8A23A06808BDA3435D0854AA92303547BC87A92046B6AF22B6E962352"
+    },
+    {
+      "file": "ThreadActiveFlag.ts",
+      "sha256": "0E17998362C085D594478D3FAC2A330E89AB49669F8481E9F4791272932E3CFD"
+    },
+    {
+      "file": "ThreadStatusChangedNotification.ts",
+      "sha256": "172BF64D645C387CA07B1A4F6D30048C923B07F81D27B8E2C1A576F1204DB4B0"
+    },
+    {
+      "file": "ThreadReadParams.ts",
+      "sha256": "C24743CB5655B4C71A853A2A290412D78E1A27E0278F2A0CDE9BD9D9B78118A8"
+    },
+    {
+      "file": "Thread.ts",
+      "sha256": "9A2A7AB942BBC6D2A8C0757E991AB81ED6D3E55D70439B228C1F202DB42CD3DC"
+    },
+    {
+      "file": "Turn.ts",
+      "sha256": "5A0852E46A13446CCB3AA3F493C06A9151A43772D530521789AC741ED115DA5F"
+    },
+    {
+      "file": "TurnCompletedNotification.ts",
+      "sha256": "1F56D73CB06876533FB224CD285634D3E090B21B647009BE0E7C622937E40D3E"
+    },
+    {
+      "file": "TurnStatus.ts",
+      "sha256": "C69049363F97E97844E9FC851F0CD4122DA057BA1371DE003A28C00AB7A6EF1A"
+    }
+  ],
+  "facts": {
+    "statusEventFields": [
+      "threadId",
+      "status"
+    ],
+    "threadStatus": [
+      "notLoaded",
+      "idle",
+      "systemError",
+      "active"
+    ],
+    "activeFlags": [
+      "waitingOnApproval",
+      "waitingOnUserInput"
+    ],
+    "completedEventPrivacy": "Turn includes items and error; not inherently status-only",
+    "threadReadPrivacy": "Thread.preview may contain first user message even without turns",
+    "turnStatus": [
+      "completed",
+      "interrupted",
+      "failed",
+      "inProgress"
+    ]
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "scope": "static and pure logic only; no browser or DOM emulation",
+  "results": [
+    {
+      "id": "scenario-count",
+      "status": "passed"
+    },
+    {
+      "id": "AB-interleave-0",
+      "status": "passed"
+    },
+    {
+      "id": "same-task-old-generation-0",
+      "status": "passed"
+    },
+    {
+      "id": "AB-interleave-1",
+      "status": "passed"
+    },
+    {
+      "id": "same-task-old-generation-1",
+      "status": "passed"
+    },
+    {
+      "id": "S12-current-3-history-1",
+      "status": "passed"
+    },
+    {
+      "id": "disconnect-unknown",
+      "status": "passed"
+    },
+    {
+      "id": "credentials-example-semantics",
+      "status": "passed"
+    },
+    {
+      "id": "prefix-preserve",
+      "status": "passed"
+    },
+    {
+      "id": "static-isolation",
+      "status": "passed"
+    }
+  ],
+  "passed": true,
+  "browser": "blocked by URL policy",
+  "user_walkthrough": "pending",
+  "artifacts": [
+    {
+      "file": "acceptance.md",
+      "sha256": "74e7e4d0879fd0ab4f7d1ff6d2fb8b48631545524db2f8bbf35ed6613dcc5ae9"
+    },
+    {
+      "file": "index.html",
+      "sha256": "7dc718c738b24b0ed566e78c30145f4ec83c8dd3c7606f772554ee84cb7c9f60"
+    },
+    {
+      "file": "prototype.css",
+      "sha256": "76c490c8597dcc46c4263dd1106517d08735f528f469249de0485237f1d9841c"
+    },
+    {
+      "file": "prototype.js",
+      "sha256": "b35778c99a217d7e68c5dfd6a5e9b3c4dc21138dba75e0417dd5e7c5461e75cd"
+    },
+    {
+      "file": "README.md",
+      "sha256": "4474bc53e1f97f9a447433e9a88f2a27cebf4877f67386d4a9b29b0b2b28dc36"
+    },
+    {
+      "file": "scenarios.js",
+      "sha256": "a0ad9579be1ac9efd4345ff38936ba6aad959296683e07812e31453fef6e5312"
+    }
+  ]
+}

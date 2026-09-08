@@ -1,0 +1,3 @@
+# Preserve byte-exact frozen review evidence and hashed prototype artifacts.
+docs/plans/chatgpt-desktop/** -text whitespace=cr-at-eol
+prototypes/chatgpt-desktop/** -text whitespace=cr-at-eol

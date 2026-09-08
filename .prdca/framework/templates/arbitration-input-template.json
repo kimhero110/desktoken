@@ -1,0 +1,27 @@
+{
+  "dissent": [],
+  "findings": [
+    {
+      "category": "architecture",
+      "evidence": [
+        "tests/example.log"
+      ],
+      "id": "FND-001",
+      "reviewer_id": "reviewer-001",
+      "severity": "P2",
+      "status": "open",
+      "substantiated": true,
+      "evidence_verification": {
+        "status": "verified",
+        "verified_by": "qa-evidence-verifier"
+      }
+    }
+  ],
+  "test_results": [
+    {
+      "deterministic": true,
+      "id": "TST-001",
+      "status": "passed"
+    }
+  ]
+}

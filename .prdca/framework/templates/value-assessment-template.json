@@ -1,0 +1,34 @@
+{
+  "project_thesis_id": "THESIS-001",
+  "macro_milestone_id": "M1",
+  "work_package_id": "WP-001",
+  "user_capability": "A named user can complete a measurable workflow that was not previously possible.",
+  "value_hypothesis": {
+    "beneficiary": "Named user role",
+    "problem": "Observable user problem",
+    "expected_change": "Expected improvement in user behavior or outcome"
+  },
+  "success_metrics": [
+    {
+      "id": "VAL-001",
+      "name": "User task completion rate",
+      "baseline": 0,
+      "target": 0.9,
+      "measurement_method": "Observe representative users completing the declared workflow.",
+      "evidence_level": "user_task"
+    }
+  ],
+  "active_work_packages": 1,
+  "wip_limit": 2,
+  "blocked_decisions": [],
+  "direction_review": {
+    "cycles_since_review": 0,
+    "interval": 4,
+    "status": "current"
+  },
+  "diminishing_returns": {
+    "consecutive_cycles_without_user_gain": 0,
+    "stop_after": 2,
+    "disposition": "not_due"
+  }
+}

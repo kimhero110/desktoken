@@ -1,0 +1,25 @@
+{
+  "observedAt": "2026-09-08T01:40:44.1945070+08:00",
+  "package": "OpenAI.Codex",
+  "version": "26.901.6511.0",
+  "displayName": "ChatGPT",
+  "executable": "app/ChatGPT.exe",
+  "signatureStatus": "Valid",
+  "signer": "CN=\"OpenAI OpCo, LLC\", O=\"OpenAI OpCo, LLC\", L=San Francisco, S=California, C=US",
+  "runningAppCount": 22,
+  "allRunningAppPathsMatchPackage": true,
+  "appServers": [
+    {
+      "transport": "default_stdio_per_docs",
+      "directParentIsChatGPT": true
+    },
+    {
+      "transport": "default_stdio_per_docs",
+      "directParentIsChatGPT": true
+    }
+  ],
+  "limitations": [
+    "Command line transport classification does not enumerate private IPC",
+    "No endpoint connection or model task performed"
+  ]
+}

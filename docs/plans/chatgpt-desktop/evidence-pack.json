@@ -1,0 +1,114 @@
+{
+  "note": "初始化证据包；不是D/C/A完成证书",
+  "reviews": [],
+  "skill_candidates": [
+    {
+      "reason": "重复误认应用和安装等同生效；保留规则，接入流程尚不稳定",
+      "id": "desktop-identity-evidence",
+      "decision": "defer"
+    }
+  ],
+  "rollback": {
+    "procedure": "仅撤销本轮文档改动，不更改产品及桌面配置"
+  },
+  "stage": "P",
+  "delivery_id": "DEL-WP-001",
+  "objectives": [
+    "完成ChatGPT桌面端细节方案与P/R循环"
+  ],
+  "owner": "用户（产品）",
+  "risks": [
+    "目标身份待核实",
+    "接口未验证",
+    "不得越过P/R进入实现"
+  ],
+  "artifacts": [
+    "PLAN-v1.md",
+    "risk.json",
+    "value-result.json"
+  ],
+  "approvals": [],
+  "requirements": [
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-01",
+      "priority": "Must",
+      "acceptance_test": "AT-01"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-02",
+      "priority": "Must",
+      "acceptance_test": "AT-02"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-03",
+      "priority": "Must",
+      "acceptance_test": "AT-03"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-04",
+      "priority": "Must",
+      "acceptance_test": "AT-04"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-05",
+      "priority": "Must",
+      "acceptance_test": "AT-05"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-06",
+      "priority": "Must",
+      "acceptance_test": "AT-06"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-07",
+      "priority": "Must",
+      "acceptance_test": "AT-07"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-08",
+      "priority": "Must",
+      "acceptance_test": "AT-08"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-09",
+      "priority": "Must",
+      "acceptance_test": "AT-09"
+    },
+    {
+      "implementation_status": "not_started",
+      "source": "PLAN-v1.md §6",
+      "test_status": "not_run",
+      "id": "CG-10",
+      "priority": "Must",
+      "acceptance_test": "AT-10"
+    }
+  ],
+  "accountable_ai": "primary-agent"
+}

@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "reviewers": [],
+  "notes": [
+    "Add only reviewers whose availability and independence have been verified.",
+    "Keep credentials in environment variables or a secret manager, never in this file."
+  ]
+}

@@ -1,5 +1,9 @@
 # PLAN（现状版）
 
+## 当前规划重点（2026-09-08）
+
+ChatGPT 桌面端与精简菜单总体方案已完成P/R。[WP-003隔离交互原型](docs/plans/chatgpt-desktop/WP-003/PLAN-v3.md)已由 OpenCode + GLM-5.3 编码并完成两轮返修，10项静态/纯逻辑检查通过，独立源码复核发现的4项P2已修复并关闭；浏览器验收受工具安全策略阻塞，整体C未通过，用户走查pending。最新证据见[实施与QA记录](docs/plans/chatgpt-desktop/WP-003/GLM-QA.md)，GATE.md保留实施前历史决定。依赖调整只允许合成原型先行；WP-002真实只读信号仍缺证据，回P并继续阻塞WP-004正式监控，不能将原型检查或CLI支持推定为桌面接入。
+
 > 本文件是**活文档**，描述 QuotaBar 当前的实际形态与近期方向。
 > 2026-09-01 的四轮评审原始计划已归档至 [docs/PLAN-history.md](docs/PLAN-history.md)——
 > 其中的设计规格（26 态 UI、10px 圆角、wiremock 测试层等）部分已被后续实测推翻或延后，以本文件为准。
@@ -61,3 +65,5 @@ src-tauri/src/
 - [ ] 手动多把命名 key（kimi/二号）
 
 发布边界（2026-09-07）：ChatGPT 桌面端未接入，Codex 桌面端未验证。Codex CLI hook 配置与桌面端监控不能混为一谈。v0.4.0-beta.1 为预览版，v0.3.2 保持稳定版。
+
+WP-003原型现状（2026-09-08）：视觉R4与U5可用性R5返修完成，源码/语法检查通过，用户对视觉方向基本认可；浏览器及五流程实际验收pending，正式ChatGPT监控未接通。原型六文件已复制入仓库[prototypes/chatgpt-desktop](prototypes/chatgpt-desktop/README.md)（草稿，现行权威版本；隔离路径文档为历史记录），最新QA证据见[USABILITY-R5](docs/plans/chatgpt-desktop/WP-003/USABILITY-R5.md)及usability-r5-results.json。

@@ -1,0 +1,16 @@
+{
+  "critical_flags": [],
+  "external_review_allowed": false,
+  "dimensions": {
+    "external_exposure": 1,
+    "impact": 2,
+    "irreversibility": 0,
+    "low_testability": 1,
+    "novelty": 1,
+    "semantic_ambiguity": 1
+  },
+  "review_focus": [
+    "architecture",
+    "qa"
+  ]
+}

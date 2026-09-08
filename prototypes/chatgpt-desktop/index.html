@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuotaBar WP-003 · ChatGPT 桌面集成交互原型（演示）</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="prototype.css">
+<script src="scenarios.js" defer></script>
+<script src="prototype.js" defer></script>
+</head>
+<body>
+
+<header class="frame-header">
+  <p class="frame-banner" role="note">交互原型 · 使用示例数据 · 不连接实际应用</p>
+  <h1>QuotaBar · ChatGPT 桌面集成 · 交互原型（演示）</h1>
+  <details class="review-panel">
+    <summary>评审工具（画框外，不计入产品操作）：场景 / 视图 / 时钟 / 计数</summary>
+    <div class="review-panel-body">
+      <div class="frame-controls">
+        <div class="fc-group">
+          <label for="sceneSelect">场景（12 固定示例）</label>
+          <select id="sceneSelect"></select>
+        </div>
+        <div class="fc-group" aria-label="视图快捷切换（评审工具，不计入产品操作）">
+          <span class="fc-label">视图快捷</span>
+          <button type="button" id="fxBar">悬浮条</button>
+          <button type="button" id="fxPanel">面板</button>
+          <button type="button" id="fxSettings">设置</button>
+        </div>
+        <div class="fc-group">
+          <button type="button" id="btnFastClock">时钟快进 1 分钟（演示）</button>
+          <button type="button" id="btnResetDemo">重置演示（重新加载）</button>
+        </div>
+        <div class="fc-group counter">
+          <span>产品操作计数：<b id="actionCount">0</b></span>
+          <button type="button" id="btnCountReset">归零</button>
+        </div>
+      </div>
+      <div class="scene-info" id="sceneInfo" aria-live="polite">
+        <p><b id="sceneName"></b></p>
+        <p id="sceneDesc"></p>
+        <p id="sceneExpect"></p>
+      </div>
+    </div>
+  </details>
+</header>
+
+<main class="product-stage" id="productStage" aria-label="产品画框（演示桌面）">
+
+  <div class="fake-desktop" id="fakeDesktop">
+
+    <div class="hoverbar" id="hoverBar" tabindex="0" role="button"
+         aria-haspopup="menu" aria-expanded="false" aria-controls="panel"
+         aria-label="QuotaBar 悬浮条（演示）：点击展开面板，右键或菜单键打开菜单">
+      <span class="dot dot-unknown" id="barDot" aria-hidden="true"></span>
+      <span class="bar-text" id="barText">额度 72% · $42.5 / $60.0（示例数据）</span>
+      <span class="chip chip-pause" id="barPause" hidden>暂停</span>
+      <span class="chip chip-off" id="barNotifOff" hidden>提醒关</span>
+      <span class="demo-chip" aria-hidden="true">演示</span>
+    </div>
+
+    <section class="panel" id="panel" role="dialog" aria-label="QuotaBar 面板（演示）" hidden>
+      <header class="panel-head">
+        <span class="conn-chip" id="connChip">未验证（演示）</span>
+        <button type="button" class="icon-btn" id="panelClose" aria-label="收起面板（返回悬浮条）">✕</button>
+      </header>
+
+      <div class="panel-main" id="panelMain">
+        <div class="quota-row">
+          <h4 id="quotaTitle">额度摘要（示例）</h4>
+          <button type="button" class="btn ghost" id="btnRefresh">刷新</button>
+        </div>
+        <p class="quota-line" id="quotaLine">未知（连接未验证）</p>
+        <ul class="task-list" id="taskList" hidden></ul>
+
+        <div class="panel-actions">
+          <button type="button" class="btn primary" id="btnOpenApp">打开 ChatGPT（演示）</button>
+          <button type="button" class="btn" id="btnPanelPause" aria-haspopup="menu" aria-expanded="false">暂停提醒 ▾</button>
+        </div>
+
+        <div class="panel-events">
+          <h4>最近事件（演示时钟 · 示例）</h4>
+          <ul class="event-list" id="recentList"></ul>
+          <button type="button" class="btn ghost" id="btnAllRecords">查看全部</button>
+        </div>
+      </div>
+
+      <div class="panel-records" id="panelRecords" hidden>
+        <h4>全部记录（最多 100 条 · 演示）<span class="rec-count" id="recCount">0/100</span></h4>
+        <ul class="event-list record-scroll" id="recordList"></ul>
+        <button type="button" class="btn ghost" id="btnRecordsBack">返回</button>
+      </div>
+
+      <p class="panel-feedback" id="panelFeedback" role="status" aria-live="polite"></p>
+      <p class="panel-demo-label">交互原型 · 使用示例数据 · 不连接实际应用</p>
+    </section>
+
+    <div class="pause-pop" id="pausePop" role="menu" aria-label="暂停提醒时长（演示）" hidden>
+      <button type="button" role="menuitem" id="pp15">15 分钟（演示）</button>
+      <button type="button" role="menuitem" id="pp1h">1 小时（演示）</button>
+      <button type="button" role="menuitem" id="ppResume">直到恢复（演示）</button>
+    </div>
+
+    <div class="demo-toast" id="demoToast" role="status" aria-label="演示通知" hidden>
+      <div class="toast-head">
+        <strong>演示通知 · 非系统通知</strong>
+        <button type="button" class="icon-btn" id="toastClose" aria-label="关闭演示通知">✕</button>
+      </div>
+      <p class="toast-title" id="toastTitle"></p>
+      <p class="toast-body" id="toastBody"></p>
+      <div class="toast-actions">
+        <button type="button" class="btn primary" id="toastView">查看</button>
+        <button type="button" class="btn" id="toastDismiss">忽略</button>
+      </div>
+    </div>
+
+    <section class="settings-win" id="settingsWin" role="dialog" aria-labelledby="settingsTitle" hidden>
+      <header class="settings-head">
+        <h2 id="settingsTitle">设置 <span class="demo-chip" aria-hidden="true">演示原型</span></h2>
+        <button type="button" class="btn ghost" id="settingsClose">✕ 关闭</button>
+      </header>
+
+      <div class="settings-body">
+        <nav class="settings-nav" role="tablist" aria-label="设置页签">
+          <button type="button" role="tab" id="tab-conn" aria-selected="true" aria-controls="page-conn" tabindex="0">连接</button>
+          <button type="button" role="tab" id="tab-remind" aria-selected="false" aria-controls="page-remind" tabindex="-1">提醒</button>
+          <button type="button" role="tab" id="tab-appearance" aria-selected="false" aria-controls="page-appearance" tabindex="-1">外观</button>
+        </nav>
+
+        <div class="settings-pages">
+
+          <div role="tabpanel" id="page-conn" aria-labelledby="tab-conn">
+            <div class="card chatgpt-card">
+              <h3>ChatGPT（桌面）</h3>
+              <p class="status-line"><span class="dot dot-unknown" id="connDot" aria-hidden="true"></span><span id="connStatusMain">状态：能力未验证（演示）</span></p>
+              <p class="hint">应用身份 ≠ 能力：身份信息仅为示例，未做任何真实检测。ChatGPT 卡片与下方 CLI 工具不合并。</p>
+              <button type="button" class="btn primary" id="btnAccessGuide">查看接入说明</button>
+            </div>
+
+            <section class="fold">
+              <button type="button" class="fold-head" id="fhSources" aria-expanded="false" aria-controls="fbSources">
+                <span>额度来源</span><span class="fold-arrow" aria-hidden="true">▾</span>
+              </button>
+              <div class="fold-body" id="fbSources" hidden>
+                <div class="source-row">
+                  <label for="srcOfficial"><input type="checkbox" class="switch" id="srcOfficial" checked> 官方额度页（示例）</label>
+                  <span class="chip" id="srcOfficialChip">已启用（演示）</span>
+                </div>
+                <div class="source-row">
+                  <label for="srcApi"><input type="checkbox" class="switch" id="srcApi" checked> API 平台（示例）</label>
+                  <span class="chip" id="srcApiChip">已启用（演示）</span>
+                </div>
+                <div class="source-row nested">
+                  <label for="srcApiInstance"><input type="checkbox" class="switch" id="srcApiInstance" checked> 实例 1（示例）</label>
+                  <span class="chip" id="srcApiInstanceChip">已启用（演示）</span>
+                </div>
+
+                <div class="sub-box cred-box">
+                  <h5>手动凭据（示例路径）</h5>
+                  <label class="field-label" for="credInput">API 密钥（真实输入已禁用）</label>
+                  <div class="row">
+                    <input type="text" id="credInput" disabled placeholder="真实密钥输入已禁用（演示）" aria-describedby="credHint">
+                    <button type="button" class="btn" id="btnSampleCred">使用示例凭据</button>
+                  </div>
+                  <p class="hint" id="credHint">请勿输入真实数据。演示仅保存固定掩码示例凭据。</p>
+                  <p class="chip-line"><span class="chip" id="credMask">未保存示例凭据（演示）</span></p>
+                  <div class="row">
+                    <button type="button" class="btn" id="btnCredSave">保存（演示）</button>
+                    <button type="button" class="btn" id="btnCredVerify">验证（演示）</button>
+                    <button type="button" class="btn" id="btnCredDelete">删除（演示）</button>
+                  </div>
+                  <p class="result" id="credResult" role="status" aria-live="polite"></p>
+                </div>
+
+                <div class="sub-box tpl-box">
+                  <h5>Moonshot 模板（合成样例）</h5>
+                  <div id="tplList"></div>
+                  <p class="hint">模板的保存 / 保存验证 / 删除均为模拟路径；“填入”会将示例值载入下方高级编辑。</p>
+                </div>
+
+                <div class="fold nested-fold">
+                  <button type="button" class="fold-head" id="fhCustom" aria-expanded="false" aria-controls="fbCustom">
+                    <span>高级 · 自定义来源（需展开编辑）</span><span class="fold-arrow" aria-hidden="true">▾</span>
+                  </button>
+                  <div class="fold-body" id="fbCustom" hidden>
+                    <p class="hint">所有值均为合成样例，请勿输入真实数据。切换设置页签不丢草稿，点“重置演示”才清空。</p>
+                    <label class="field-label" for="cName">名称</label>
+                    <input type="text" id="cName" maxlength="40">
+                    <label class="field-label" for="cPoll">轮询间隔（1–1440 分钟）</label>
+                    <input type="number" id="cPoll" min="1" max="1440">
+                    <label class="field-label" for="cEndpoint">端点（示例，永不被请求）</label>
+                    <input type="text" id="cEndpoint" maxlength="120">
+                    <label class="field-label" for="cHeader">认证头名称（如 Authorization）</label>
+                    <input type="text" id="cHeader" maxlength="120">
+                    <label class="field-label" for="cPrefix">认证前缀（如 Bearer 加一个空格）</label>
+                    <input type="text" id="cPrefix" maxlength="40">
+                    <label class="field-label" for="cWindow">窗口映射（标签 | 已用字段 | 限额字段或字面量 | 重置字段可选 | invert 可选；字段用点路径，如 data.used）</label>
+                    <input type="text" id="cWindow" maxlength="200">
+                    <label class="check-line" for="cInvert"><input type="checkbox" class="switch" id="cInvert"> 窗口映射反转（invert）</label>
+                    <div class="row">
+                      <button type="button" class="btn" id="btnCustomSave">保存（演示）</button>
+                      <button type="button" class="btn" id="btnCustomSaveVerify">保存并验证（演示）</button>
+                      <button type="button" class="btn" id="btnCustomDelete">删除（演示）</button>
+                    </div>
+                    <p class="result" id="customResult" role="status" aria-live="polite"></p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="fold">
+              <button type="button" class="fold-head" id="fhTools" aria-expanded="false" aria-controls="fbTools">
+                <span>已有工具（CLI 接入 · 示例）</span><span class="fold-arrow" aria-hidden="true">▾</span>
+              </button>
+              <div class="fold-body" id="fbTools" hidden>
+                <fieldset class="tool-picker" role="radiogroup" aria-label="选择已有工具（示例，独立选择）">
+                  <legend class="sr-only">选择已有工具</legend>
+                  <label><input type="radio" name="tool" value="codex"> Codex CLI</label>
+                  <label><input type="radio" name="tool" value="claude"> Claude Code</label>
+                  <label><input type="radio" name="tool" value="opencode"> OpenCode V1</label>
+                </fieldset>
+                <div class="row">
+                  <button type="button" class="btn" id="btnGenConfig" disabled>生成配置（演示）</button>
+                  <button type="button" class="btn" id="btnInstall" disabled>模拟安装</button>
+                  <button type="button" class="btn" id="btnRemove" disabled>移除</button>
+                </div>
+                <div class="config-preview" id="configPreview" hidden>
+                  <h5>配置预览（虚构路径与内容 · 演示）</h5>
+                  <p class="mono" id="cfgPath"></p>
+                  <pre class="code-block" id="cfgPre"></pre>
+                  <p class="result" id="toolCheckResult" role="status" aria-live="polite"></p>
+                </div>
+                <p class="hint">切换工具会清除旧配置与旧结果并重新禁用操作；检查结果只称“示例配置匹配”，不代表已登录、已信任或已连接。</p>
+              </div>
+            </section>
+
+            <section class="fold">
+              <button type="button" class="fold-head" id="fhDiag" aria-expanded="false" aria-controls="fbDiag">
+                <span>诊断</span><span class="fold-arrow" aria-hidden="true">▾</span>
+              </button>
+              <div class="fold-body" id="fbDiag" hidden>
+                <div class="row">
+                  <button type="button" class="btn" id="btnDiagPreview">预览诊断信息（脱敏示例）</button>
+                  <button type="button" class="btn" id="btnDiagCopy">复制（演示）</button>
+                </div>
+                <pre class="code-block" id="diagPre" hidden></pre>
+                <p class="result" id="diagResult" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <div class="overlay" id="guideOverlay" hidden>
+              <h3>ChatGPT 桌面接入说明（内部演示文档）</h3>
+              <ul class="guide-list">
+                <li>当前状态：能力未验证（演示）。本原型不检测、不连接任何应用，也不发起任何网络请求。</li>
+                <li>应用身份 ≠ 能力：即使识别到 ChatGPT 桌面应用身份，额度信号可靠性仍需独立验证。</li>
+                <li>真实接入条件（由 WP-004 决定，本包不承诺）：可靠的额度信号来源、窗口/进程边界的权限确认、身份冲突仲裁。</li>
+                <li>本说明为纯内部文档，返回后不丢焦点。</li>
+              </ul>
+              <button type="button" class="btn" id="guideBack">返回</button>
+            </div>
+          </div>
+
+          <div role="tabpanel" id="page-remind" aria-labelledby="tab-remind" hidden>
+            <div class="switch-row">
+              <label for="notifMaster"><input type="checkbox" class="switch" id="notifMaster" checked> 提醒总开关</label>
+              <span class="chip" id="notifMasterChip">开启（演示）</span>
+            </div>
+            <div class="row">
+              <button type="button" class="btn" id="btnTestNotif">测试通知（演示）</button>
+            </div>
+            <p class="result" id="testNotifResult" role="status" aria-live="polite"></p>
+
+            <div class="sub-box pause-box">
+              <h5>暂停提醒（演示时钟）</h5>
+              <div class="row">
+                <button type="button" class="btn" id="p15">15 分钟</button>
+                <button type="button" class="btn" id="p1h">1 小时</button>
+                <button type="button" class="btn" id="pResume">直到恢复</button>
+                <button type="button" class="btn" id="btnUnpause" hidden>恢复提醒</button>
+              </div>
+              <p class="chip-line"><span class="chip chip-pause" id="pauseStateChip">未暂停（演示）</span></p>
+              <p class="hint">暂停只是通知行为，不冻结状态变化，也不删除最近事件。</p>
+            </div>
+
+            <div class="status-grid">
+              <div class="status-cell"><span class="cell-label">连接状态</span><span class="chip" id="chipConn">未验证（演示）</span></div>
+              <div class="status-cell"><span class="cell-label">通知启用</span><span class="chip" id="chipNotif">开启（演示）</span></div>
+              <div class="status-cell"><span class="cell-label">暂停状态</span><span class="chip" id="chipPause">未暂停（演示）</span></div>
+              <div class="status-cell"><span class="cell-label">系统提交结果</span><span class="chip" id="chipSubmit">尚未提交（演示）</span></div>
+            </div>
+            <p class="hint">关闭提醒或暂停不会删除最近事件；系统关闭/勿扰标“可见性未确认”，API 失败标“提交失败”，均不改变连接状态（不变红）。</p>
+            <p class="hint">本原型不读取系统通知权限，也不自动关闭 ChatGPT 自带通知。</p>
+          </div>
+
+          <div role="tabpanel" id="page-appearance" aria-labelledby="tab-appearance" hidden>
+            <div class="field">
+              <label for="opacityRange">不透明度 <output id="opacityOut" for="opacityRange">0.90</output></label>
+              <input type="range" id="opacityRange" min="0.60" max="1.00" step="0.02" value="0.90">
+              <span class="range-scale" aria-hidden="true">0.60 — 1.00（步长 0.02）</span>
+            </div>
+            <div class="field">
+              <span class="field-label" id="widthLabel">悬浮条宽度（7 个固定值）</span>
+              <div class="chips" id="widthChips" role="radiogroup" aria-labelledby="widthLabel">
+                <label><input type="radio" name="barwidth" value="240"> 240</label>
+                <label><input type="radio" name="barwidth" value="260"> 260</label>
+                <label><input type="radio" name="barwidth" value="280"> 280</label>
+                <label><input type="radio" name="barwidth" value="300" checked> 300</label>
+                <label><input type="radio" name="barwidth" value="320"> 320</label>
+                <label><input type="radio" name="barwidth" value="340"> 340</label>
+                <label><input type="radio" name="barwidth" value="360"> 360</label>
+              </div>
+            </div>
+            <div class="switch-row">
+              <label for="miniToggle"><input type="checkbox" class="switch" id="miniToggle"> 迷你显示（尺寸开关，与摘要类型可组合）</label>
+              <span class="chip" id="miniChip">关（演示）</span>
+            </div>
+            <div class="switch-row">
+              <label for="autoStartToggle"><input type="checkbox" class="switch" id="autoStartToggle"> 开机启动</label>
+              <span class="chip" id="autoStartChip">关（仅演示）</span>
+            </div>
+            <p class="hint" id="appearanceNote">参数仅改变本原型内部预览与内存值，不修改宿主窗口或系统开机配置；刷新网页恢复固定初始样例（不持久化）。</p>
+          </div>
+
+        </div>
+      </div>
+
+      <footer class="settings-foot">
+        <button type="button" class="btn ghost" id="aboutBtn">关于与更新</button>
+        <span class="foot-note">交互原型 · 使用示例数据 · 不连接实际应用</span>
+      </footer>
+
+      <div class="overlay" id="aboutOverlay" hidden>
+        <h3>关于与更新（演示）</h3>
+        <div class="row">
+          <button type="button" class="btn" id="btnUpdate">检查更新（演示）</button>
+          <button type="button" class="btn" id="btnReport">报告问题（演示）</button>
+          <button type="button" class="btn" id="btnSponsor">赞助（演示）</button>
+        </div>
+        <p class="result" id="aboutResult" role="status" aria-live="polite"></p>
+        <p class="hint">以上入口仅显示演示反馈，不打开浏览器、不发送任何数据。此面板不是第四个设置页。</p>
+        <button type="button" class="btn" id="aboutBack">返回设置</button>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="stage-msg" id="stageMsg" hidden>
+    <p>演示已退出（模拟）：悬浮条已隐藏。此操作不退出任何程序、不修改任何配置。</p>
+    <button type="button" class="btn" id="btnReenter">重新进入演示</button>
+  </div>
+</main>
+
+<footer class="frame-footer">
+  <p>画框外评审工具不计入产品操作；右键或菜单键（Shift+F10）打开悬浮条菜单。边界：无网络 / 无系统通知 / 无剪贴板 / 无存储 / 无 Tauri IPC / 无安装，全部数据为内存合成样例，刷新即还原。</p>
+</footer>
+
+</body>
+</html>

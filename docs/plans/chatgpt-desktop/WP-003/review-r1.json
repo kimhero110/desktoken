@@ -1,0 +1,128 @@
+{
+  "review_id": "REV-WP003-R1",
+  "reviewer_id": "isolated-prototype-readiness-reviewer",
+  "provider": "OpenAI",
+  "model": "GPT-6 (inherited; exact variant not exposed)",
+  "packet_id": "WP-003/packet-v1.json",
+  "context_isolated": true,
+  "independent": true,
+  "review_assignment": "挑战依赖调整是否偷换目标或降低真实监控门槛；核对原型计划的权限、迁移与验收缺口。只判断本包原型Do准入，不为整体监控准入背书。",
+  "packet_integrity": {
+    "algorithm": "sha256",
+    "included_files": 9,
+    "matched_files": 9
+  },
+  "payload_scope": [
+    "packet-v1.json列出的9个文件",
+    "独立评审协议与模板",
+    "review-board/SKILL.md",
+    "src/settings.html静态源码相关片段",
+    "src-tauri/src/main.rs菜单与刷新相关静态片段"
+  ],
+  "source_access_exclusions": [
+    "未读取账户、会话、配置、凭据或已安装应用",
+    "未读取其他评审结论",
+    "未访问外部网站或外部评审服务"
+  ],
+  "findings": [
+    {
+      "id": "FND-WP003-R1-001",
+      "category": "qa",
+      "severity": "P3",
+      "status": "open",
+      "substantiated": true,
+      "affected_requirement_ids": [
+        "PR-02",
+        "PUI-08"
+      ],
+      "claim": "键盘验收中的折叠区数量与计划不一致，属于非阻断的测试清单修订。",
+      "evidence": [
+        "PLAN-v1.md §3：额度来源、已有工具默认折叠，诊断独立折叠；高级自定义来源还需明确展开编辑。",
+        "ACCEPTANCE.md PUI-08：列出“2折叠区”，同时要求不存在不可达控件或焦点丢失。"
+      ],
+      "inference": "至少三个独立折叠入口已明确；若执行者只勾选两个，可能漏掉诊断的展开状态/键盘检查。全控件可达要求已经覆盖底线，故不构成权限或Do准入阻断。",
+      "reproduction": "按PLAN §3逐项列出额度来源、已有工具、诊断，对比PUI-08的数量2；构造前两者键盘正常但诊断aria-expanded错误的实现，数量清单可能漏测。",
+      "recommendation": "将“2折叠区”改为“所有折叠区（至少额度来源、已有工具、诊断，含高级自定义展开入口）”，保持原来的全控件可达要求。",
+      "owner": "primary-agent",
+      "due": "D1前更新并重新冻结受影响验收文件"
+    }
+  ],
+  "lanes": [
+    {
+      "lane": "product",
+      "result": "pass",
+      "evidence": "value.json；CHANGE-CONTROL.md明确只验证用户已指出的菜单问题，不替代监控完成；UA-01在Do后实测。"
+    },
+    {
+      "lane": "domain",
+      "result": "pass",
+      "evidence": "PLAN §3–4区分应用身份、配置匹配、任务可观察与通知系统可见性；默认未知。"
+    },
+    {
+      "lane": "architecture",
+      "result": "pass",
+      "evidence": "PLAN §1、§6独立静态原型、无真实接口、file策略失败则报告限制；WP-004仍依赖WP-002。"
+    },
+    {
+      "lane": "data_governance",
+      "result": "pass",
+      "evidence": "PLAN §4、§6限定合成ID、内存状态、最多100事件、刷新/场景清理；禁账户与会话来源。"
+    },
+    {
+      "lane": "knowledge_engineering",
+      "result": "pass",
+      "applicability": "仅原型枚举与关系模型；不涉及知识库",
+      "evidence": "PLAN §4明确connection/task分离及任务/轮次身份；PUI-06覆盖并发与旧代。"
+    },
+    {
+      "lane": "ai_rag",
+      "result": "pass",
+      "applicability": "本包无模型调用或RAG",
+      "evidence": "PLAN §1明确禁止调用模型；所有场景为固定样例，未承诺模型质量。"
+    },
+    {
+      "lane": "security",
+      "result": "pass",
+      "evidence": "PLAN §1、§6权限禁区、CSP与无持久化要求可验证；PUI-01/PUI-12检查静态和运行期边界。"
+    },
+    {
+      "lane": "qa",
+      "result": "conditional pass",
+      "evidence": "PUI-01..12可测且与生产验收隔离；唯一非阻断修订见FND-WP003-R1-001。"
+    },
+    {
+      "lane": "operations",
+      "result": "pass",
+      "evidence": "PLAN §1、§6关闭即可回滚，不修改生产或系统；无新增服务/依赖。"
+    },
+    {
+      "lane": "delivery",
+      "result": "pass",
+      "evidence": "CC-003明确Major重新P/R、WIP=1，WP-002回P且持续阻塞WP-004；PLAN §7本轮不执行D1。"
+    }
+  ],
+  "dependency_challenge": {
+    "observed": "CHANGE-CONTROL明确仅拆出无真实信号的隔离交互原型；PLAN §1/§7和PUI-12保留生产边界。",
+    "counterexample_checked": "若原型全通过但真实信号仍不存在，WP-004依然不能开工；若开发需要真实接口，PLAN §7要求停该路径回P。",
+    "conclusion": "冻结包未将菜单原型通过推导为监控可用，未降低真实监控门槛。"
+  },
+  "migration_check": {
+    "observed": "源码确认原生菜单8项、外观7宽度值/透明度、平台与实例、国内国际模板、自定义映射、3工具配置与通知入口。",
+    "conclusion": "14组有明确模拟路径与逐项操作验收；网页原型与原生行为差异已显式保留，未发现阻断迁移遗漏。"
+  },
+  "decision": "conditional pass",
+  "blocking_issues": [],
+  "required_plan_revisions": [
+    "统一PUI-08折叠入口覆盖表述，D1前完成。"
+  ],
+  "evidence_requested_next": [
+    "仅若修订：更新ACCEPTANCE与冻结清单并核对哈希；无需原型编码前提供用户实际走查。"
+  ],
+  "do_admission": {
+    "prototype": "未发现阻断；非阻断修订完成并由主代理确定性仲裁后可声明本包Do-ready。本轮仍按用户范围停在P/R。",
+    "overall_monitoring": "不准入；WP-002缺少现有实例只读状态源，WP-004仍须新的P/R及真实验收。",
+    "product_tests": "PUI-01..12、UA-01及上游AT仍未执行；此评审不改变状态。"
+  },
+  "arbitration": "本报告提供证据，不进行投票或最终门槛仲裁；由主代理验证发现并依据规则决定。",
+  "unresolved_dissent": []
+}

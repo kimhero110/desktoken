@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "cost": 0,
+      "event": "review_call",
+      "latency_ms": 0,
+      "reviewer_id": "reviewer-001",
+      "structured_output": true
+    },
+    {
+      "event": "finding",
+      "outcome": "confirmed",
+      "reviewer_id": "reviewer-001",
+      "unique_contribution": true
+    }
+  ]
+}

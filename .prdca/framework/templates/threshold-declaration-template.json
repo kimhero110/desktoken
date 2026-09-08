@@ -1,0 +1,25 @@
+{
+  "declaration_id": "THR-001",
+  "work_package_id": "WP-001",
+  "declared_at": "2026-01-01T09:00:00Z",
+  "thresholds": [
+    {
+      "id": "THR-E2E",
+      "name": "Core end-to-end workflow success rate",
+      "metric": "core_e2e_success_rate",
+      "comparator": ">=",
+      "target": 1.0,
+      "unit": "ratio",
+      "measurement_method": "Run every declared core workflow test and divide successful runs by total runs."
+    },
+    {
+      "id": "THR-P01",
+      "name": "Open P0/P1 defects",
+      "metric": "open_p0_p1_count",
+      "comparator": "<=",
+      "target": 0,
+      "unit": "count",
+      "measurement_method": "Count open defects at P0 or P1 severity in the defect list."
+    }
+  ]
+}

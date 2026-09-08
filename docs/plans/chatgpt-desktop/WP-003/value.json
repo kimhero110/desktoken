@@ -1,0 +1,34 @@
+{
+  "project_thesis_id": "THESIS-LOCAL-AI",
+  "macro_milestone_id": "M-CG-DESKTOP",
+  "work_package_id": "WP-003",
+  "user_capability": "通过可点击原型在连接、提醒、外观三页找到日常入口，并区分配置存在与ChatGPT状态可观察",
+  "value_hypothesis": {
+    "beneficiary": "本机 ChatGPT 桌面用户",
+    "problem": "用户明确指出配置菜单失焦；当前单页混合外观、hook代码、凭据与自定义端点",
+    "expected_change": "先验证信息架构及旧入口迁移，避免尚未接通的监控能力挤占菜单"
+  },
+  "success_metrics": [
+    {
+      "id": "VAL-001",
+      "name": "五条用户流程与全部旧入口的可操作原型覆盖",
+      "baseline": "未测，现有对话证实存在接入误判",
+      "target": 1,
+      "measurement_method": "D后独立走查5条流程及14组迁移，用户实际走查另记待验收，不冒充实机监控通过",
+      "evidence_level": "user_task"
+    }
+  ],
+  "active_work_packages": 1,
+  "wip_limit": 1,
+  "blocked_decisions": [],
+  "direction_review": {
+    "cycles_since_review": 0,
+    "interval": 4,
+    "status": "current"
+  },
+  "diminishing_returns": {
+    "consecutive_cycles_without_user_gain": 0,
+    "stop_after": 2,
+    "disposition": "not_due"
+  }
+}

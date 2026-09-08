@@ -1,0 +1,11 @@
+{
+  "dissent": [],
+  "findings": [],
+  "test_results": [
+    {
+      "id": "WP002-PACKET",
+      "status": "passed",
+      "deterministic": true
+    }
+  ]
+}

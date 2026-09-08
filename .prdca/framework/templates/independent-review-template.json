@@ -1,0 +1,28 @@
+{
+  "context_isolated": true,
+  "findings": [
+    {
+      "affected_requirement_ids": [
+        "REQ-001"
+      ],
+      "category": "architecture",
+      "claim": "Describe one concrete issue.",
+      "evidence": [
+        "artifact path, test log, or reproducible behavior"
+      ],
+      "id": "FND-001",
+      "inference": "Explain what follows from the evidence.",
+      "reproduction": "Provide bounded reproduction steps.",
+      "severity": "P2",
+      "status": "open",
+      "substantiated": true
+    }
+  ],
+  "independent": true,
+  "model": "reviewer-model",
+  "packet_id": "PACKET-001",
+  "provider": "reviewer-provider",
+  "review_assignment": "Check requirement-to-implementation mismatch only.",
+  "review_id": "REV-001",
+  "reviewer_id": "reviewer-001"
+}

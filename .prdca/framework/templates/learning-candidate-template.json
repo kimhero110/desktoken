@@ -1,0 +1,38 @@
+{
+  "candidate_id": "LEARN-001",
+  "name": "repeatable-workflow-name",
+  "problem": "Describe the repeated cost, defect, or rediscovery.",
+  "capability_type": "skill",
+  "owner": "",
+  "evidence_signals": [
+    {
+      "type": "workflow_use",
+      "occurrences": 3,
+      "references": ["cycle-1", "cycle-2", "cycle-3"]
+    },
+    {
+      "type": "artifact_rewrite",
+      "occurrences": 2,
+      "references": ["artifact-1", "artifact-2"]
+    }
+  ],
+  "expected_benefit": {
+    "metric": "manual_steps_per_run",
+    "baseline": 8,
+    "target": 3,
+    "measurement_method": "Compare two trial uses with the recorded baseline."
+  },
+  "overlap_check": {
+    "performed": true,
+    "overlap_found": false,
+    "existing_asset_id": null
+  },
+  "validation_plan": {
+    "forward_tests": ["representative-case-1", "representative-case-2"],
+    "quality_guardrail": "Acceptance rate must not fall."
+  },
+  "risk_level": "moderate",
+  "approval": {"authority_id": null},
+  "contains_credentials": false,
+  "contains_unapproved_sensitive_data": false
+}

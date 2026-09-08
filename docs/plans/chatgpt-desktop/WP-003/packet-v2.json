@@ -1,0 +1,46 @@
+{
+  "algorithm": "sha256",
+  "path_base": "manifest_directory",
+  "included": [
+    {
+      "path": "ACCEPTANCE-v2.md",
+      "sha256": "ed811a139d9f41c4fa78b689eaa066138cfdd70da161abb2bd9044ea18369114"
+    },
+    {
+      "path": "CHANGE-CONTROL-v2.md",
+      "sha256": "8f0b290107f295e29cd152e1833cc5d19d24898ac7864abc78965acc1f1d4883"
+    },
+    {
+      "path": "PLAN-v2.md",
+      "sha256": "86905e5593993593e338b5c45eaad9e12ff210c219f623da9a1c85703fe25be6"
+    },
+    {
+      "path": "SOURCES.md",
+      "sha256": "f27a3a53c9e11a2217a60a1d8779668790efda6e1ecf459424e5e9405b44ba24"
+    },
+    {
+      "path": "evidence-initial.json",
+      "sha256": "0df399be5bba5829b9d490e5fa93b75e50d058ba51ca9a41f06f6e9f685c7cdb"
+    },
+    {
+      "path": "risk.json",
+      "sha256": "f9b9941778e034cfe5d1d20ef23d7e6e25fd94bd48cfeadff84596a084198447"
+    },
+    {
+      "path": "route.json",
+      "sha256": "9cd1032f3d811caab48103bdc47c96fc2d5e0435d5f93e82b6fd1c6bb60e8b76"
+    },
+    {
+      "path": "source-baseline.json",
+      "sha256": "dd9e8902b13c0c31f3da8ee9e8c826a70a84384bdda5718bc17f2362f4fa136b"
+    },
+    {
+      "path": "value-result.json",
+      "sha256": "94cc929b81e08b45cf725ed4aeac995b372e44f159ea40e90e9ae36f6d0832aa"
+    },
+    {
+      "path": "value.json",
+      "sha256": "cb88dbbfbb922302a9332dfc4fab6ce400ea1c859cb29a3bf02e3d65479453d6"
+    }
+  ]
+}

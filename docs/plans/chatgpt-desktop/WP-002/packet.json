@@ -1,0 +1,26 @@
+{
+  "algorithm": "sha256",
+  "path_base": "manifest_directory",
+  "included": [
+    {
+      "path": "PLAN.md",
+      "sha256": "4c693943a5822a51531dec4c457ba96d7767b7b902270da62ca5d9d5de909c47"
+    },
+    {
+      "path": "risk.json",
+      "sha256": "f9b9941778e034cfe5d1d20ef23d7e6e25fd94bd48cfeadff84596a084198447"
+    },
+    {
+      "path": "route.json",
+      "sha256": "9cd1032f3d811caab48103bdc47c96fc2d5e0435d5f93e82b6fd1c6bb60e8b76"
+    },
+    {
+      "path": "value-result.json",
+      "sha256": "2db29cf9c8efc42da4b10502f60d58890377b58a8c7dbfdc378510d81dfb4a83"
+    },
+    {
+      "path": "value.json",
+      "sha256": "654713fe99d874687ff074220dfc6547bcae89c305d2cd42b0e67bd8e8c500b2"
+    }
+  ]
+}
