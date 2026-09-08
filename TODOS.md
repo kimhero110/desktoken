@@ -24,7 +24,9 @@
 - [x] 设置页默认路径接入诊断及测试通知入口。
 - [x] 本机预览版实际切换、配置备份、三个默认工具接入安装及 OpenCode 全局事件实测。
 - [x] Codex只读诊断：17项测试通过；桌面子进程运行时匹配，8个QuotaBar hooks均已启用但未信任，见[实测记录](docs/codex-desktop-probe.md)。
-- [ ] 桌面设置 Coding → Hooks 入口实际可见性及审核后真实桌面联调；Claude Code登录后联调、系统通知可见性确认。
+- [x] 桌面Hooks页面已由用户截图确认；8项信任就绪，当前桌面对话working事件已真实到达QuotaBar接收器。
+- [x] 当前桌面对话working事件接收、本轮结束面板截图确认；安装版隔离原生链路回归通过（3会话/7个通知候选）。
+- [ ] 桌面真实等待授权/输入及恢复联调、多任务与系统通知可见性；Claude Code登录后联调。
 - [ ] macOS hook 调用、桌面通知验证。
 - [ ] Kimi Code、OpenClaw、Antigravity、OpenCode V2 适配。
 - [x] 保留现有设置的一键安装/卸载、原文件备份和接入诊断。

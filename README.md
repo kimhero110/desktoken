@@ -1,5 +1,7 @@
 # QuotaBar
 
+> 桌面接入实测（2026-09-08）：已确认当前桌面任务工作事件接收及本轮结束面板显示；真实等待授权/输入、全模式覆盖和系统通知可见性仍待验证。见[桌面联调证据](docs/codex-desktop-probe.md)。
+
 > 原型进展（2026-09-08）：OpenCode + GLM-5.3已完成视觉R4与暂停菜单可用性R5返修，源码/语法检查通过，用户对视觉方向基本认可；浏览器与实际用户验收pending，正式ChatGPT监控未接通，现有发布范围不变。原型六文件已复制入仓库 [prototypes/chatgpt-desktop](prototypes/chatgpt-desktop/README.md)（草稿），最新QA证据见 [USABILITY-R5](docs/plans/chatgpt-desktop/WP-003/USABILITY-R5.md)。
 
 <p align="center"><img src="docs/icon-256.png" width="96" alt="QuotaBar logo" /></p>
