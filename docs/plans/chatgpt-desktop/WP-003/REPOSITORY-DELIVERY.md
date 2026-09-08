@@ -23,6 +23,6 @@
 
 ## 推送状态
 
-- 远程推送**尚未执行**，待协调者（coordinator）核验后再进行；在核验完成前，任何文档不得声称已推送。
+- 2026-09-08：交付提交 `9196026` 已成功推送到 GitHub 与 Gitee 的 `main`，均为正常快进；本记录作为后续文档提交同步。未创建发布标签或安装包。
 
-同步目标：GitHub kimhero110/desktoken main；Gitee xu512/quotabar main（沿用项目README已列镜像，已fetch，历史可快进）。为保留冻结证据及原型哈希，.gitattributes限定这些路径不做换行转换；待推送记录以Git远程分支实际提交为准。
+同步目标：GitHub kimhero110/desktoken main；Gitee xu512/quotabar main（沿用项目README已列镜像，已fetch，历史可快进）。为保留冻结证据及原型哈希，.gitattributes限定这些路径不做换行转换；推送状态以Git远程分支实际提交为准。21项暂存文件哈希核验、计划结构检查和双JS语法检查通过；整体UI验收状态不变。
