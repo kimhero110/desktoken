@@ -1,8 +1,8 @@
 # QuotaBar
 
-> 桌面接入实测（2026-09-08）：已确认当前桌面任务工作事件接收及本轮结束面板显示；真实等待授权/输入、全模式覆盖和系统通知可见性仍待验证。见[桌面联调证据](docs/codex-desktop-probe.md)。
+> 桌面接入实测（2026-09-08）：用户报告真实桌面链路 等待授权 → 恢复工作 → 本轮停止 通过，结束状态面板显示有截图确认；等待输入与全模式覆盖未验证，系统通知可见性仍待验证。任务列表已知显示限制（目录名非任务标题、无调度元数据）见[显示语义](docs/task-display-semantics.md)。
 
-> 原型进展（2026-09-08）：OpenCode + GLM-5.3已完成视觉R4与暂停菜单可用性R5返修，源码/语法检查通过，用户对视觉方向基本认可；浏览器与实际用户验收pending，正式ChatGPT监控未接通，现有发布范围不变。原型六文件已复制入仓库 [prototypes/chatgpt-desktop](prototypes/chatgpt-desktop/README.md)（草稿），最新QA证据见 [USABILITY-R5](docs/plans/chatgpt-desktop/WP-003/USABILITY-R5.md)。
+> 原型进展（2026-09-08）：OpenCode + GLM-5.3已完成视觉R4与暂停菜单可用性R5返修，源码/语法检查通过，用户对视觉方向基本认可；浏览器与实际用户验收pending，原型尚未合入正式界面；桌面 hook 联调进度见上方实测记录，现有发布范围不变。原型六文件已复制入仓库 [prototypes/chatgpt-desktop](prototypes/chatgpt-desktop/README.md)（草稿），最新QA证据见 [USABILITY-R5](docs/plans/chatgpt-desktop/WP-003/USABILITY-R5.md)。
 
 <p align="center"><img src="docs/icon-256.png" width="96" alt="QuotaBar logo" /></p>
 
@@ -36,7 +36,7 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 ## 功能特性
 
-- **v0.4.0-beta.1 预览：本机任务状态**。额度 / 本机任务页签，展示工作、等待授权、等待输入、本轮结束、错误和未知；可选桌面通知。提供 Codex CLI、Claude Code、OpenCode V1 的接入配置预览、一键安装/移除、配置检查和测试通知；Windows 配置替换及备份保留原访问控制规则。OpenCode 已通过真实结束及授权等待联调，Windows 通知调用成功；其余工具和弹窗可见性仍待确认。**ChatGPT 桌面端未接入，Codex 桌面端未验证；CLI 配置不代表桌面端支持。**仅当前电脑，v0.3.2 稳定包不含此功能。[下载预览版](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.1)。见 [接入与状态边界](docs/task-monitor.md)。
+- **v0.4.0-beta.1 预览：本机任务状态**。额度 / 本机任务页签，展示工作、等待授权、等待输入、本轮已停止、错误和未知；可选桌面通知。提供 Codex CLI、Claude Code、OpenCode V1 的接入配置预览、一键安装/移除、配置检查和测试通知；Windows 配置替换及备份保留原访问控制规则。历史联调（发布时点）：OpenCode 真实结束及授权等待通过，Windows 通知调用成功，其余工具待确认。当前源码本地桌面实测（2026-09-08）：用户报告 Codex 桌面真实链路 等待授权 → 恢复 → 停止 通过——这确认了本机当前桌面环境可用，不等于全部模式或全部机器覆盖。**CLI 配置不代表桌面端支持；跨模式覆盖未验证。**仅当前电脑，v0.3.2 稳定包不含此功能。[下载预览版](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.1)。见 [接入与状态边界](docs/task-monitor.md)。
 
 - **悬浮条常驻桌面**：半透明 acrylic、置顶、整面拖动、**永不抢焦点**——在 VS Code 里打字时拖它，光标纹丝不动（这是血泪换来的 `WS_EX_NOACTIVATE`，不是吹的）
 - **左键点一下，展开详情卡**：每窗口的已用/剩余、重置的准确时刻、套餐与数据来源、官方页面直达链接，外加 **7 日用量 sparkline**（本地 SQLite，哪都不去）

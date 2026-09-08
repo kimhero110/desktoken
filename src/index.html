@@ -197,10 +197,15 @@
       for (const task of tasks) {
         const row = document.createElement('div'); row.className = 'task';
         const head = document.createElement('div');
-        head.textContent = `${task.tool} · ${taskLabel(task.state, isZh)}`;
+        head.textContent = `${toolName(task.tool, isZh)} · ${taskLabel(task.state, isZh)}`;
         head.style.color = taskColor(task.state);
+        if (task.state === 'ended') {
+          head.title = endedHint(isZh);
+          head.setAttribute('aria-label', `${head.textContent} —— ${endedHint(isZh)}`);
+        }
         const meta = document.createElement('div'); meta.className = 'task-meta';
-        meta.textContent = `${task.project || '—'} · ${task.session_id.slice(0, 8)} · ${fmtFresh(task.updated_at / 1000, false)}`;
+        const projectLabel = isZh ? '项目' : 'Project';
+        meta.textContent = `${projectLabel}：${task.project || '—'} · ${shortSessionId(tasks, task.session_id, task.tool)} · ${fmtFresh(task.updated_at / 1000, false)}`;
         row.appendChild(head); row.appendChild(meta); el.appendChild(row);
       }
     }
@@ -427,7 +432,7 @@
   function stripMessage() {
     const attention = taskSummary(tasks, isZh);
     if (attention) return attention;
-    if (taskView && tasks.length) return `${tasks[0].tool} · ${taskLabel(tasks[0].state, isZh)}`;
+    if (taskView && tasks.length) return `${toolName(tasks[0].tool, isZh)} · ${taskLabel(tasks[0].state, isZh)}`;
     const sug = suggestion();
     if (sug) return sug; // ≥90%: the joke yields to routing advice
     const now = new Date();

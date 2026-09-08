@@ -47,7 +47,7 @@ impl State {
             Self::Working => "正在工作",
             Self::WaitingApproval => "等待授权",
             Self::WaitingInput => "等待输入",
-            Self::Ended => "本轮结束",
+            Self::Ended => "本轮已停止",
             Self::Failed => "发生错误",
             Self::Interrupted => "已中断",
             Self::Unknown => "状态未知",

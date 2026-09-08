@@ -45,7 +45,7 @@ test('actual page event renderer handles success, partial failure and complete f
   assert.equal(get('tasks').style.display,'block');
   assert.equal(get('providers').style.display,'none');
   assert.equal(get('detail').style.display,'none');
-  assert.equal(get('tasks').children.at(-1).children[0].textContent,'codex · 等待授权');
+  assert.equal(get('tasks').children.at(-1).children[0].textContent,'Codex · 等待授权');
   get('quota-tab').events.click();
   assert.equal(get('tasks').style.display,'none');
   assert.equal(get('providers').style.display,'');
