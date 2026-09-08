@@ -83,7 +83,7 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 国内下载慢：用 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)，或在链接前面拼你常用的 GitHub 加速镜像，文件在 Release 附件里，镜像站通用。
 
-> **⚠️ Windows Defender / SmartScreen 须知**：未签名程序触发 SmartScreen「未知发布者」提示只是信誉机制，**与 Defender 的恶意软件检测是两回事**。2026-09-09，用户本机 Defender 对 v0.4.0-beta.2 的 `quotabar.exe` 报出 `Bearfoos.A!ml`、`Persistence.A!ml` 检测。我们不建议添加排除项或关闭任何杀毒软件，也不会断言这是误报——证据与来龙去脉见 **[docs/windows-defender-20260909.md](docs/windows-defender-20260909.md)**。
+> **Windows 下载提示**：当前开发版归档文件已被本机 Defender 拦截，暂不建议运行 Windows 下载包。检测原因尚未确认，不能认定为误报。SmartScreen 的发布者信誉提示与 Defender 恶意软件检测不同，详见 [检测记录与处理进度](docs/windows-defender-20260909.md)。
 
 ### 从源码构建
 
@@ -187,7 +187,7 @@ reset 字段自动识别 epoch 秒/毫秒/RFC3339。接进来就和内置五家�
 停笔不等于交卷。「本轮已停止」只表示这一轮停了，不证明目标完成，也不代表计划任务以后不再运行。列表里的「项目」目前是工作目录名，不是 ChatGPT 侧栏的任务标题；真实标题和后续调度信息还没接入。见 [显示规则](docs/task-display-semantics.md)。
 
 **Q: 杀软报毒？**
- 未签名 + 读凭据文件的程序容易被启发式引擎盯上。2026-09-09 已有用户本机 Defender 对 beta.2 报出 `Bearfoos.A!ml` / `Persistence.A!ml` 的实测记录，详见 [Windows Defender 检测说明](docs/windows-defender-20260909.md)。我们不建议关闭或加排除项，也不断言误报：最彻底的信任是自己核对 `checksums.txt` 后从源码构建。SmartScreen 的「未知发布者」提示与 Defender 恶意软件检测是两回事，前者只是未签名程序的常规信誉提示。
+已有本机 Defender 检测记录，正在核查，见 [处理进度](docs/windows-defender-20260909.md)。请勿关闭防护或添加排除项来绕过。哈希和构建证明只能确认产物来源，从源码构建也不能单独证明程序安全。
 
 **Q: 怎么更新？**
 右键 → 检查更新。有新版本时悬浮条顶部出黄色横幅，可以「跳过此版本」。绿色 exe 下载替换即可，安装包覆盖安装保留设置。
