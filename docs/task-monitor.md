@@ -104,6 +104,6 @@ v0.4.0-beta.1 命令行安装入口：`quotabar task-install codex|claude|openco
 
 ## Codex 已安装但没有状态
 
-运行 `node scripts/diagnose-codex-hooks.cjs [codex.exe绝对路径]`，只读查询 Codex 自己的 hooks/list。若显示 enabled=true、trust=untrusted，表示配置被发现但执行被信任门槛阻止；目录的 trust_level=trusted 不等于 hook 已信任。打开 PowerShell，运行 codex 进入 CLI，再输入 /hooks，审阅并信任来自 ~/.codex/hooks.json 的 QuotaBar 条目；重新打开 Codex 并开始任务。不要把 /hooks 当作普通聊天消息发送给助手。安装器不写信任记录，也不使用绕过信任参数。
+运行 `node scripts/diagnose-codex-hooks.cjs [codex.exe绝对路径]`，只读查询 Codex 自己的 hooks/list，输出脱敏 JSON 摘要（ok、category、counts、逐事件 enabled/trust/managed；不含路径、警告或错误文本），详见 [Codex 桌面端探查记录](codex-desktop-probe.md)。category=needs_trust 表示存在 enabled=true 且 trust=untrusted 的 hook：配置被发现但执行被信任门槛阻止；目录的 trust_level=trusted 不等于 hook 已信任。**必须手动完成信任步骤**：打开 PowerShell，运行 codex 进入 CLI，再输入 /hooks，逐条审阅并信任来自 ~/.codex/hooks.json 的 QuotaBar 条目；重新打开 Codex 并开始任务。不要把 /hooks 当作普通聊天消息发送给助手。安装器和诊断脚本都不写信任记录，也不使用绕过信任参数。category=ready 也只表示已信任的启用配置就绪，**不保证 ChatGPT 桌面端（Chat/Work 模式）正在运行这些 hooks**——脚本恒定输出 desktopConnectionVerified:false，CLI hooks/list 成功只是配置证据，不能证明当前桌面端订阅。
 
 发布边界（2026-09-07）：ChatGPT 桌面端未接入，Codex 桌面端未验证。Codex CLI hook 配置与桌面端监控不能混为一谈。v0.4.0-beta.1 为预览版，v0.3.2 保持稳定版。
