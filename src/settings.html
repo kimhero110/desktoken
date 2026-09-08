@@ -80,18 +80,19 @@
   <label><input type="checkbox" id="task-notifications" /> 桌面通知：等待授权、等待输入、本轮已停止或异常</label>
   <div class="note">仅监控当前电脑。先生成配置查看内容，再点击安装或手动合并，之后重启对应工具。安装会备份原文件并保留其他设置；不会批准工具操作。长时间无事件显示“状态未知”。</div>
   <div class="row" style="margin-top:8px">
-    <select id="task-tool"><option value="codex">Codex CLI（需信任）</option><option value="claude">Claude Code</option><option value="opencode">OpenCode V1</option></select>
+    <select id="task-tool"><option value="codex">Codex（用户钩子）</option><option value="claude">Claude Code</option><option value="opencode">OpenCode V1</option></select>
     <button id="task-config">生成配置</button>
   </div>
   <div id="task-target" class="note" style="overflow-wrap:anywhere"></div>
   <textarea id="task-snippet" rows="7" readonly aria-label="任务接入配置" style="margin-top:8px"></textarea>
   <div class="row" style="margin-top:8px"><button id="task-install" disabled>安装接入</button><button id="task-remove" class="ghost" disabled>移除接入</button></div>
   <div id="task-install-result" class="note" role="status" style="overflow-wrap:anywhere"></div>
-  <div class="note">配置绑定当前 QuotaBar 可执行文件路径，移动程序后需重新生成。ChatGPT 桌面端未接入；Codex 桌面端未验证。Kimi Code、OpenClaw、Antigravity 尚未接入。</div>
+  <div class="note">配置绑定当前 QuotaBar 可执行文件路径，移动程序后需重新生成。已使用 QuotaBar 插件时，请勿重复安装用户钩子。Kimi Code、OpenClaw、Antigravity 尚未接入。</div>
+  <div class="note">ChatGPT 桌面端：设置 → Coding → Hooks → QuotaBar（插件来源名为 QuotaBar；此处安装的是「用户配置」用户钩子），审核并信任钩子后才会上报任务状态；安装或开启开关不等于已信任，钩子定义更新后可能需重新审核。</div>
   <div class="row" style="margin-top:8px"><button id="task-check" class="ghost">检查接入</button><button id="task-test-toast" class="ghost">发送测试通知</button></div>
   <div id="task-health" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
   <div id="task-toast-result" class="note" role="status"></div>
-  <div class="note">仅检查默认配置目录。配置匹配不等于已经登录或获得 hook 信任；Codex 请在 /hooks 中审阅并信任配置。系统通知还受勿扰模式影响。</div>
+  <div class="note">仅检查默认用户配置文件，不检查插件来源（QuotaBar）的信任状态。配置匹配不等于已经登录。系统通知还受勿扰模式影响。</div>
 </div>
 
 <h2>平台凭据</h2>
