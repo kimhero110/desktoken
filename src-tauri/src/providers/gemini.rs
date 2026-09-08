@@ -74,7 +74,9 @@ $ports = (Get-NetTCPConnection -OwningProcess $p.ProcessId -State Listen -ErrorA
 $csrf = ([regex]::Match($p.CommandLine, '--csrf_token ([0-9a-fA-F-]+)')).Groups[1].Value
 "$ports|$csrf"
 "#;
+    use std::os::windows::process::CommandExt;
     let out = std::process::Command::new("powershell")
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW: avoid console flash
         .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
         .output()
         .ok()?;
