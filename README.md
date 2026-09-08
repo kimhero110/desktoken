@@ -51,7 +51,7 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 | 平台 | 凭据来源 | 轮询 | 接口性质 | 备注 |
 |---|---|---|---|---|
-| **Kimi** | 自动读 `~/.kimi-code/credentials/kimi-code.json`，或 Console API key | 2min | CLI 同源 | Kimi CLI 自家接口，稳 |
+| **Kimi** | 自动读 `~/.kimi-code/credentials/kimi-code.json`，或 Console API key | 2min | CLI 同源 | Kimi CLI 自家接口，稳；官方端点 5h 窗口可能不返回 `used`，此时按 `limit-remaining` 推导（[细节](docs/kimi-quota-fix.md)） |
 | **GLM 智谱** | 手动粘 API key（进 Windows 凭据管理器） | 2min | 半官方 | 智谱自家 coding 插件同源；国内/国际双端点自动试，积分制套餐也认 |
 | **Codex** | 自动读 `~/.codex/auth.json`（OAuth 刷新） | 2min | CLI 同源 | Codex CLI 自用接口 |
 | **Claude** | 自动读 `~/.claude/.credentials.json`（OAuth 刷新写回） | **10min** | 非官方 | 频控敏感，轮询慢是故意的，别催 |
