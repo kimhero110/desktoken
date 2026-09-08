@@ -61,29 +61,31 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 ## 安装
 
-### 下载（推荐）
+### 下载与版本选择
 
-日常看额度选稳定版，想试本机任务选开发预览版：
+稳定版保留额度功能，开发预览版增加本机任务。两个版本的下载包都保留，当前 Windows 检测情况请先看下面这条说明。
 
-| | **稳定版 v0.3.2**（推荐日常） | **开发预览版 v0.4.0-beta.2**（尝鲜测试） |
+> **Windows 下载提示（2026-09-09）**：v0.4.0-beta.2 归档程序已被本机 Defender 拦截，原因仍在核查，**暂不建议运行该 Windows 开发包**。稳定版继续保留，但尚无逐版本检测结论，不能把“稳定版”理解为杀毒兼容性保证。请勿关闭防护或添加排除项绕过；详见 [检测记录与处理进度](docs/windows-defender-20260909.md)。
+
+| | **稳定版 v0.3.2** | **开发预览版 v0.4.0-beta.2** |
 |---|---|---|
 | 功能 | 只管额度 | 额度 + 本机任务状态（预览） |
+| Windows 当前状态 | 包保留，检测结论未逐版本确认 | 已有 Defender 拦截，暂不建议运行 |
 | 任务接入 | 无 | 可选工具钩子，装完还需在工具里审核信任 |
 | 发布页 | [v0.3.2](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2) | [v0.4.0-beta.2](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2) |
 | Gitee 镜像 | [稳定版下载](https://gitee.com/xu512/quotabar/releases/tag/v0.3.2) | [开发预览版下载](https://gitee.com/xu512/quotabar/releases/tag/v0.4.0-beta.2) |
-| Windows 安装包 | [QuotaBar_0.3.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/QuotaBar_0.3.2_x64-setup.exe)（自动处理 WebView2） | [QuotaBar_0.4.0-beta.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.2/QuotaBar_0.4.0-beta.2_x64-setup.exe)（同款安装体验） |
-| Windows 绿色版 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/quotabar.exe)，扔哪儿跑哪儿 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.2/quotabar.exe)，绿色单文件 |
+| Windows 安装包 | [QuotaBar_0.3.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/QuotaBar_0.3.2_x64-setup.exe)（自动处理 WebView2） | [QuotaBar_0.4.0-beta.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.2/QuotaBar_0.4.0-beta.2_x64-setup.exe)（检测待核查） |
+| Windows 绿色版 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/quotabar.exe)，绿色单文件 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.2/quotabar.exe)，绿色单文件 |
 | macOS | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2)自取 DMG（架构见文件名） | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2)自取 DMG（架构见文件名） |
 
 下载前请留意：
 
-- **默认下载仍是稳定版**：beta 按预发布标注，不抢 Latest 的位置，要尝鲜请认准版本号自己点。
+- **默认版本仍是 v0.3.2**：GitHub 的 Latest 标记与原附件保留，beta.2 单独标为预发布；这些发布标记不代表杀毒检测结论。
+- **启动闪窗的源码修复尚未发包**：已补上 Antigravity 探测子进程的无控制台窗口标志，现有 beta.2 下载包不包含这项修复。它只针对闪窗，不代表 Defender 检测已解决。
 - **两个版本共用同一份设置和数据**（`%APPDATA%\quotabar`），不做隔离。切换时同一时刻只跑一个 QuotaBar——退出旧的再开新的，单实例锁也会拦着你同时开俩。
 - ChatGPT 桌面端的 QuotaBar 插件目前需从源码单独打包，尚未随发布包提供，其桌面执行也未验证，见 [插件接入说明](docs/codex-plugin.md)。
 
-国内下载慢：用 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)，或在链接前面拼你常用的 GitHub 加速镜像，文件在 Release 附件里，镜像站通用。
-
-> **Windows 下载提示**：当前开发版归档文件已被本机 Defender 拦截，暂不建议运行 Windows 下载包。检测原因尚未确认，不能认定为误报。SmartScreen 的发布者信誉提示与 Defender 恶意软件检测不同，详见 [检测记录与处理进度](docs/windows-defender-20260909.md)。
+国内下载可查看 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)。镜像提供相同版本，Windows 检测提示同样适用。
 
 ### 从源码构建
 
