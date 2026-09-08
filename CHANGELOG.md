@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.0-beta.3 (2026-09-09，预览版)
+
+- Windows Antigravity 探测使用原生 WMI/TCP API；任务钩子移除 PowerShell 包装。
+- 自启改用 Startup 快捷方式，正常启动不再写 Run 项；显式设置时校验迁移归属和冲突。
+- 升级后需重新生成钩子/个人插件并在宿主审核信任。
+- 本地测试包经用户确认启动不闪黑窗、未被 Defender 拦截；旧 beta.2 复核结论未确认，保留提示。
+- 发布范围、验证边界和下载见 [beta.3 发布说明](docs/releases/v0.4.0-beta.3.md)。
+
+
 ## v0.4.0-beta.1 (2026-09-07，预览版)
 
 - 支持边界更正：ChatGPT 桌面端未接入，Codex 桌面端未验证；Codex CLI hooks 安装后仍需信任，不能据此宣称桌面端可用。
