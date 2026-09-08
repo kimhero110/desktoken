@@ -1,8 +1,10 @@
 # Microsoft detection review draft — QuotaBar v0.4.0-beta.2
 
-Status: authorized by maintainer; not submitted yet. The Software developer flow requires Microsoft account sign-in. No submission ID or vendor determination has been received.
+Status: submitted. WDSI submission ID 653e1786-6bd8-483b-8bb9-14dd2db70e18; the receipt page shows Submitted (Sep 9, 2026 01:47:09) and no analyst comments as checked on 2026-09-09. The original beta.2 installer was supplied with the affected portable hash and sanitized evidence. No vendor determination has been received.
 
-## Suggested submission description
+The text below is the expanded evidence draft; the submitted form used a condensed 1,715-character English description within the 1,900-character limit, distinguishing the installer from the quarantined portable executable.
+
+## Expanded evidence description
 
 Please review the detection of our public open-source Windows desktop application QuotaBar (repository name: desktoken). We request a determination of the detection cause and whether this is a false positive; we are not assuming the result.
 
