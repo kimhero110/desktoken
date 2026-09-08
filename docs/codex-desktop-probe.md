@@ -48,7 +48,7 @@ timeout、invalid_response）。
 
 可执行文件级同一性是比配置匹配更强的**运行时身份证据**（桌面端确实在跑同一 codex-cli 0.153.4 app-server，且 hook 命令指向当前桌面版接收器），但它仍不构成"桌面端当前正在订阅并执行这些 hooks"的实证；`desktopConnectionVerified` 恒为 `false`。导出的 JSON 摘要不包含任何实际路径、命令或正文。
 
-下一步：在 PowerShell 运行 `codex` 进入 CLI，输入 `/hooks`，逐条审阅并信任来自
+历史CLI说明（不作为桌面用户的操作要求）：CLI可用 `/hooks` 审阅来自
 `~/.codex/hooks.json` 的 QuotaBar 条目，重新打开 Codex 后再验证真实会话事件。安装器、
 诊断脚本均不写信任记录，也不使用绕过信任的参数。桌面端是否在 Chat/Work 模式运行
 hooks 取决于其版本和配置，本诊断不对此做任何保证。
@@ -59,4 +59,17 @@ hooks 取决于其版本和配置，本诊断不对此做任何保证。
 
 2026-09-08：GLM实现，主代理执行17项Node诊断测试全部通过。本机新脚本复测ok=true、category=needs_trust、hooks=8、enabled=8、enabledUntrusted=8、managed=0、desktopConnectionVerified=false。先前测试计时器及事件名大小写失败已修正，不算作通过记录。
 
-本轮完成只读诊断，不写信任记录、不操作桌面会话。下一步必须由用户在Codex官方/hooks审核界面审阅这些QuotaBar条目并信任，再验证真实桌面事件。信任仅是hook路线的前置条件，不保证所有Chat/Work模式支持。
+本轮完成只读诊断，不写信任记录、不操作桌面会话。后续应优先核对桌面自身Hooks审核入口，再验证真实桌面事件，不能要求桌面用户切换CLI作为默认方案。信任仅是hook路线的前置条件，不保证所有Chat/Work模式支持。
+
+## 桌面设置入口的新增证据
+
+只读检查本机26.901.6511.0安装包的静态资源：settings-page资源将hooks-settings列入Coding分组；hooks-settings页面包含待审核列表、User config来源、Trust按钮，并通过当前hook的currentHash提交信任动作。由此确认桌面包内存在自身审核界面实现，之前只指引CLI不完整。未执行或修改应用资源、未调用私有接口或写信任。静态实现不等于已实际看到当前账号界面；入口实际可见性及信任后桌面事件仍待验证。
+
+## 桌面用户的最小联调步骤
+
+1. 在桌面应用设置中查找 Coding（编程）下的 Hooks；若没有入口，先核对界面，不切换CLI或改信任文件。
+2. 在 User config 中审阅指向桌面quotabar.exe的8个事件条目，确认后使用应用自身Trust按钮。
+3. 主代理复测只读诊断确认是否从needs_trust变化，再开始一条普通桌面任务验证工作/结束。不能把信任变化当作任务事件已收到。
+4. 等待授权/输入需要单独真实样本；普通任务开始/结束通过不能代替完整四态验收。
+
+最近复测：8个enabled、8个untrusted，无需重新安装或修改文件权限。当前无后台模型任务，等待桌面内实际审核或入口不可见反馈。
