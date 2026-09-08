@@ -118,3 +118,17 @@ v0.4.0-beta.1 命令行安装入口：`quotabar task-install codex|claude|openco
 运行 `node scripts/diagnose-codex-hooks.cjs [codex.exe绝对路径]`，只读查询 Codex 自己的 hooks/list，输出脱敏 JSON 摘要（ok、category、counts、逐事件 enabled/trust/managed；不含路径、警告或错误文本），详见 [Codex 桌面端探查记录](codex-desktop-probe.md)。category=needs_trust 表示存在 enabled=true 且 trust=untrusted 的 hook：配置被发现但执行被信任门槛阻止；目录的 trust_level=trusted 不等于 hook 已信任。**信任步骤按使用端区分**：桌面用户使用上述桌面 Hooks 设置中的审核入口；CLI 用户才使用 /hooks。审核来自用户配置的 QuotaBar 条目后，再验证真实任务事件。安装器和诊断脚本都不写信任记录，也不使用绕过信任参数。category=ready 也只表示已信任的启用配置就绪，**不保证 ChatGPT 桌面端（Chat/Work 模式）正在运行这些 hooks**——脚本恒定输出 desktopConnectionVerified:false，CLI hooks/list 成功只是配置证据，不能证明当前桌面端订阅。
 
 发布边界（2026-09-07）：ChatGPT 桌面端未接入，Codex 桌面端未验证。Codex CLI hook 配置与桌面端监控不能混为一谈。v0.4.0-beta.1 为预览版，v0.3.2 保持稳定版。
+
+## Codex hook 溯源字段（statusMessage）
+
+生成的 Codex hook 携带官方可选字段 `statusMessage`（见 [Codex hooks](https://learn.chatgpt.com/zh-Hans/docs/hooks)），取值为 `QuotaBar local task status: <事件名>`，用于在 hook 详情中标识该条目来自 QuotaBar 本机任务状态及对应事件；不添加任何非官方的自定义命名字段。Claude Code 配置不受影响。
+
+已安装 ChatGPT 桌面 26.901.6511.0 的静态源码检查（非运行实测）：Hooks 设置的 Hook 索引对每一行固定渲染"钩子 N"这样的序号占位，与配置元数据无关，`statusMessage` 不能重命名该行；`statusMessage` 出现在展开的条目详情中。因此该字段只辅助识别，不改变列表展示。
+
+### 延迟构成（依据代码，非实测端到端数据）
+
+事件到面板可见的延迟由多段叠加：UserPromptSubmit / PreToolUse / PostToolUse 等事件触发"正在工作"状态；hook 进程（PowerShell 启动加可执行文件启动）与宿主分发本身先消耗一段时间；接收器把事件以临时文件重命名写入本地 spool，桌面程序每 750 毫秒轮询一次该目录，轮询间隔加循环内工作与调度构成主要常驻延迟；随后前端通过 `tasks://snapshot` 收到快照并立即渲染。配置中 hook 的 3 秒 timeout 是失败超时，不是 UI 时效保证。等待/结束类提醒通知另有 2 秒去抖，与面板即时状态相互独立；前端每 30 秒的刷新只更新年龄标签，不参与事件摄取。以上均为代码结构说明，没有实测端到端延迟数据。用户报告面板现已恢复正常；本次未能定位此前不更新的原因，不能据此断言只是正常延迟。
+
+已信任的现有配置不会因此自动更新：新增 `statusMessage` 会改变 hook 定义进而改变信任哈希，信任哈希变更必须由用户重新审阅信任，安装器与诊断脚本均不写信任记录、不提供绕过。用户需在重新生成并安装配置后，按正常流程再次审阅信任。
+
+本次来源说明仅更新生成器源码，未替换本机程序、未改写现有已信任 hooks。

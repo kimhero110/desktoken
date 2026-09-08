@@ -1,5 +1,7 @@
 # QuotaBar
 
+> 本机任务时效：hook 主动上报，本地事件目录每轮间隔 750 毫秒读取；这不是从发送提示到显示的端到端保证。钩子来源说明与延迟边界见 [接入文档](docs/task-monitor.md#codex-hook-溯源字段statusmessage)。
+
 > 桌面接入实测（2026-09-08）：用户报告真实桌面链路 等待授权 → 恢复工作 → 本轮停止 通过，结束状态面板显示有截图确认；等待输入与全模式覆盖未验证，系统通知可见性仍待验证。任务列表已知显示限制（目录名非任务标题、无调度元数据）见[显示语义](docs/task-display-semantics.md)。
 
 > 原型进展（2026-09-08）：OpenCode + GLM-5.3已完成视觉R4与暂停菜单可用性R5返修，源码/语法检查通过，用户对视觉方向基本认可；浏览器与实际用户验收pending，原型尚未合入正式界面；桌面 hook 联调进度见上方实测记录，现有发布范围不变。原型六文件已复制入仓库 [prototypes/chatgpt-desktop](prototypes/chatgpt-desktop/README.md)（草稿），最新QA证据见 [USABILITY-R5](docs/plans/chatgpt-desktop/WP-003/USABILITY-R5.md)。

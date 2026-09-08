@@ -55,8 +55,12 @@ fn generate(exe: &str, tool: &str, windows: bool) -> Result<Integration, String>
     for name in common.iter().chain(extra.iter()) {
         let cmd = command(exe, tool, windows);
         let mut hook = json!({"type":"command", "command":cmd, "timeout":3});
-        if tool == "codex" && windows {
-            hook["commandWindows"] = json!(cmd);
+        if tool == "codex" {
+            // 官方可选字段，仅用于在 hook 详情中标识来源；不能重命名 Hook 索引中的行。
+            hook["statusMessage"] = json!(format!("QuotaBar local task status: {name}"));
+            if windows {
+                hook["commandWindows"] = json!(cmd);
+            }
         }
         hooks.insert((*name).into(), json!([{"hooks":[hook]}]));
     }
@@ -224,6 +228,37 @@ mod tests {
             .content
             .contains("task-event claude"));
         assert!(generate("app", "kimi", false).is_err());
+    }
+    #[test]
+    fn codex_hooks_carry_provenance_and_command_unchanged() {
+        let config = generate("test.exe", "codex", true).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&config.content).unwrap();
+        let events = v["hooks"].as_object().unwrap();
+        assert_eq!(events.len(), 8);
+        for (event, groups) in events {
+            let hook = &groups[0]["hooks"][0];
+            assert_eq!(
+                hook["statusMessage"].as_str().unwrap(),
+                format!("QuotaBar local task status: {event}")
+            );
+            assert_eq!(hook["type"], "command");
+            assert_eq!(hook["timeout"], 3);
+            use base64::Engine;
+            let encoded = hook["command"].as_str().unwrap().split_whitespace().last().unwrap();
+            let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+            let script = String::from_utf16(
+                &bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect::<Vec<_>>(),
+            ).unwrap();
+            assert!(script.contains("task-event codex"));
+            assert_eq!(script, format!("$OutputEncoding = [Console]::InputEncoding = [Text.UTF8Encoding]::new($false); [Console]::In.ReadToEnd() | & 'test.exe' task-event codex"));
+            assert_eq!(hook["command"], hook["commandWindows"]);
+            assert!(hook.get("name").is_none());
+        }
+        let claude = generate("test.exe", "claude", true).unwrap();
+        let cv: serde_json::Value = serde_json::from_str(&claude.content).unwrap();
+        for groups in cv["hooks"].as_object().unwrap().values() {
+            assert!(groups[0]["hooks"][0].get("statusMessage").is_none());
+        }
     }
     #[test]
     fn plugin_path_is_json_escaped() {
