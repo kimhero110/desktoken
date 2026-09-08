@@ -25,12 +25,17 @@ function config(tool){const r=spawnSync(exe,['task-config',tool],{env,windowsHid
 const configs=Object.fromEntries(['codex','claude'].map(t=>[t,JSON.parse(config(t))]));
 function hook(tool,id,event,extra={}){
   const h=configs[tool].hooks[event][0].hooks[0];
-  const encoded=(h.commandWindows||h.command).match(/-EncodedCommand ([A-Za-z0-9+/=]+)$/)?.[1];
-  assert.ok(encoded,'generated Windows hook must be executable');
-  const r=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',encoded],{
-    env,windowsHide:true,timeout:20000,encoding:'utf8',
-    input:JSON.stringify({session_id:id,hook_event_name:event,cwd:'C:/private/demo',prompt:'SECRET_MUST_NOT_APPEAR',...extra})
-  });
+  const input=JSON.stringify({session_id:id,hook_event_name:event,cwd:'C:/private/demo',prompt:'SECRET_MUST_NOT_APPEAR',...extra});
+  // Match real host semantics: Claude spawns command+args DIRECTLY (no
+  // shell); Codex executes the command string through the Windows shell.
+  // Codex command_runner.rs (Windows): COMSPEC cmd.exe /d /s /c plus
+  // raw_arg(r#""{command_line}""#) — one verbatim argument wrapped in an
+  // outer quote pair; windowsVerbatimArguments prevents Node re-quoting.
+  const r=h.args
+    ? spawnSync(h.command,h.args,{env,windowsHide:true,timeout:20000,encoding:'utf8',input})
+    : spawnSync('cmd.exe',['/d','/s','/c',`"${h.commandWindows||h.command}"`],{env,windowsHide:true,timeout:20000,encoding:'utf8',input,windowsVerbatimArguments:true});
+  if(h.args){assert.equal(h.command,exe);assert.deepEqual(h.args,['task-event',tool]);}
+  else{const cmd=h.commandWindows||h.command;assert.ok(!/powershell/i.test(cmd)&&cmd.startsWith('"')&&cmd.includes('task-event'),'Codex hook must be the quoted native receiver command');}
   assert.ifError(r.error);assert.equal(r.status,0,r.stderr);assert.deepEqual(JSON.parse(r.stdout),{});
 }
 (async()=>{

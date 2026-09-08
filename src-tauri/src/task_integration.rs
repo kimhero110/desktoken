@@ -9,17 +9,32 @@ pub struct Integration {
     note: String,
 }
 
-fn command(exe: &str, tool: &str, windows: bool) -> String {
+/// Characters that make a Windows hook command line unsafe to quote: NUL and
+/// control characters can truncate the line; `"` breaks out of the quoting;
+/// `%` is expanded by cmd.exe even inside double quotes (an install path under
+/// e.g. C:\%APPDATA%-style dirs could be rewritten into a different command).
+/// All other filename-legal characters are inert inside double quotes.
+fn windows_exe_path_is_safe(exe: &str) -> Result<(), String> {
+    if exe
+        .chars()
+        .any(|c| c.is_control() || c == '"' || c == '%')
+    {
+        return Err(format!(
+            "应用路径包含 Windows 命令行不安全字符（引号/百分号/控制字符），已拒绝生成 hook 命令：{exe}"
+        ));
+    }
+    Ok(())
+}
+
+fn command(exe: &str, tool: &str, windows: bool) -> Result<String, String> {
     if windows {
-        use base64::Engine;
-        let script = format!("$OutputEncoding = [Console]::InputEncoding = [Text.UTF8Encoding]::new($false); [Console]::In.ReadToEnd() | & '{}' task-event {}", exe.replace('\'', "''"), tool);
-        let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        format!(
-            "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand {}",
-            base64::engine::general_purpose::STANDARD.encode(bytes)
-        )
+        windows_exe_path_is_safe(exe)?;
+        // Direct native invocation: the host shell runs the quoted executable,
+        // which reads the hook JSON from stdin itself (no PowerShell wrapper,
+        // no encoded commands). Host stdin/stdout pass through unchanged.
+        Ok(format!("\"{exe}\" task-event {tool}"))
     } else {
-        format!("'{}' task-event {}", exe.replace('\'', "'\"'\"'"), tool)
+        Ok(format!("'{}' task-event {}", exe.replace('\'', "'\"'\"'"), tool))
     }
 }
 
@@ -53,13 +68,22 @@ fn generate(exe: &str, tool: &str, windows: bool) -> Result<Integration, String>
         &["Notification", "StopFailure"]
     };
     for name in common.iter().chain(extra.iter()) {
-        let cmd = command(exe, tool, windows);
-        let mut hook = json!({"type":"command", "command":cmd, "timeout":3});
+        // Official Claude hooks reference (code.claude.com/docs/en/hooks):
+        // when `args` is present, `command` is the executable spawned
+        // DIRECTLY (no shell). A raw path works with spaces/Unicode and
+        // avoids host-shell divergence (Windows no-args hosts use Git Bash or
+        // PowerShell, NOT cmd — do not assume cmd quoting there).
+        let mut hook = if tool == "claude" {
+            json!({"type":"command","command":exe,"args":["task-event",tool],"timeout":3})
+        } else {
+            // Codex: command string form (cmd semantics on Windows).
+            json!({"type":"command","command":command(exe, tool, windows)?,"timeout":3})
+        };
         if tool == "codex" {
             // 官方可选字段，仅用于在 hook 详情中标识来源；不能重命名 Hook 索引中的行。
             hook["statusMessage"] = json!(format!("QuotaBar local task status: {name}"));
             if windows {
-                hook["commandWindows"] = json!(cmd);
+                hook["commandWindows"] = json!(command(exe, tool, windows)?);
             }
         }
         hooks.insert((*name).into(), json!([{"hooks":[hook]}]));
@@ -124,6 +148,7 @@ fn inspect(path: &std::path::Path, expected: &Integration, tool: &str) -> &'stat
             all && g["hooks"].as_array().is_some_and(|hooks| hooks.iter().any(|h| {
                 h["type"] == "command" && h["command"] == expected_hook["command"]
                     && h.get("commandWindows") == expected_hook.get("commandWindows")
+                    && h.get("args") == expected_hook.get("args")
             }))
         }))
     }).count();
@@ -207,26 +232,22 @@ mod tests {
         let cmd = v["hooks"]["Stop"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
-        use base64::Engine;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(cmd.split_whitespace().last().unwrap())
-            .unwrap();
-        let script = String::from_utf16(
-            &bytes
-                .chunks_exact(2)
-                .map(|b| u16::from_le_bytes([b[0], b[1]]))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-        assert_eq!(
-            script,
-            "$OutputEncoding = [Console]::InputEncoding = [Text.UTF8Encoding]::new($false); [Console]::In.ReadToEnd() | & 'C:\\a b\\O''Brien $x\\quotabar.exe' task-event codex"
-        );
+        // Direct quoted native executable, no PowerShell, no encoding
+        assert_eq!(cmd, "\"C:\\a b\\O'Brien $x\\quotabar.exe\" task-event codex");
+        assert!(!cmd.to_lowercase().contains("powershell"));
+        assert!(!cmd.contains("-EncodedCommand"));
+        // unsafe path characters are rejected instead of mis-quoting
+        assert!(generate("C:\\bad%name\\quotabar.exe", "codex", true).is_err());
+        assert!(generate("C:\\bad\"quote\\quotabar.exe", "codex", true).is_err());
+        assert!(generate("C:\\bad\u{0}nul\\quotabar.exe", "codex", true).is_err());
         assert!(!config.content.contains("decision"));
-        assert!(generate("/a'b/app", "claude", false)
-            .unwrap()
-            .content
-            .contains("task-event claude"));
+        // POSIX claude uses the same direct-spawn args form
+        let claude: serde_json::Value =
+            serde_json::from_str(&generate("/a'b/app", "claude", false).unwrap().content).unwrap();
+        assert_eq!(
+            claude["hooks"]["Stop"][0]["hooks"][0]["args"],
+            json!(["task-event", "claude"])
+        );
         assert!(generate("app", "kimi", false).is_err());
     }
     #[test]
@@ -243,21 +264,35 @@ mod tests {
             );
             assert_eq!(hook["type"], "command");
             assert_eq!(hook["timeout"], 3);
-            use base64::Engine;
-            let encoded = hook["command"].as_str().unwrap().split_whitespace().last().unwrap();
-            let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
-            let script = String::from_utf16(
-                &bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect::<Vec<_>>(),
-            ).unwrap();
-            assert!(script.contains("task-event codex"));
-            assert_eq!(script, format!("$OutputEncoding = [Console]::InputEncoding = [Text.UTF8Encoding]::new($false); [Console]::In.ReadToEnd() | & 'test.exe' task-event codex"));
+            assert_eq!(
+                hook["command"].as_str().unwrap(),
+                "\"test.exe\" task-event codex"
+            );
             assert_eq!(hook["command"], hook["commandWindows"]);
             assert!(hook.get("name").is_none());
+            assert!(hook.get("args").is_none());
         }
-        let claude = generate("test.exe", "claude", true).unwrap();
-        let cv: serde_json::Value = serde_json::from_str(&claude.content).unwrap();
-        for groups in cv["hooks"].as_object().unwrap().values() {
-            assert!(groups[0]["hooks"][0].get("statusMessage").is_none());
+    }
+    /// Official Claude semantics: `command` + `args` are spawned directly,
+    /// no shell — the raw (unquoted) executable path is used verbatim.
+    #[test]
+    fn claude_hooks_use_direct_spawn_command_and_args() {
+        let config = generate("C:\\a b\\目录\\QuotaBar 拷 贝.exe", "claude", true).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&config.content).unwrap();
+        let events = v["hooks"].as_object().unwrap();
+        assert_eq!(events.len(), 9); // 7 common + Notification + StopFailure
+        for (event, groups) in events {
+            let hook = &groups[0]["hooks"][0];
+            assert_eq!(
+                hook["command"].as_str().unwrap(),
+                "C:\\a b\\目录\\QuotaBar 拷 贝.exe",
+                "raw path, event {event}"
+            );
+            assert_eq!(hook["args"], json!(["task-event", "claude"]));
+            assert_eq!(hook["type"], "command");
+            assert_eq!(hook["timeout"], 3);
+            assert!(hook.get("commandWindows").is_none());
+            assert!(hook.get("statusMessage").is_none());
         }
     }
     #[test]

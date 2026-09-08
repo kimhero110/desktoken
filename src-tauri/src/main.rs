@@ -32,6 +32,7 @@ mod settings;
 mod task_monitor;
 mod task_integration;
 mod task_install;
+mod autostart;
 mod credentials;
 mod diagnostics;
 mod fetch;
@@ -440,88 +441,14 @@ fn decline_tos(app: tauri::AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// Autostart (HKCU Run key) + misc commands
+// Misc commands
 // ---------------------------------------------------------------------------
-#[cfg(target_os = "windows")]
-const AUTOSTART_RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-#[cfg(target_os = "windows")]
-const AUTOSTART_VALUE_NAME: &str = "QuotaBar";
-
-/// The Run command must quote the executable: an unquoted path with spaces
-/// (e.g. C:\Program Files\...) is split by the loader and can execute the
-/// wrong binary. Pure helper, unit-tested.
-#[cfg(target_os = "windows")]
-fn autostart_command(exe: &std::path::Path) -> String {
-    format!("\"{}\"", exe.to_string_lossy())
-}
-
-/// Core decision logic, factored out so tests can target a throwaway subkey
-/// instead of the real Run key. Idempotent in both directions:
-/// - enable: no write when the stored command already matches
-/// - disable: only the QuotaBar value is deleted; missing value is success;
-///   real errors (access denied etc.) propagate
-#[cfg(target_os = "windows")]
-fn apply_autostart_in(
-    key: &winreg::RegKey,
-    enable: bool,
-    exe: &std::path::Path,
-) -> Result<(), String> {
-    if enable {
-        let cmd = autostart_command(exe);
-        // Read errors: NotFound (value absent) and InvalidData (wrong stored
-        // type) both mean "write it"; every other read error (permission,
-        // key deleted concurrently, ...) propagates instead of being swallowed.
-        let need_write = match key.get_value::<String, _>(AUTOSTART_VALUE_NAME) {
-            Ok(stored) => stored != cmd,
-            Err(ref e) if matches!(
-                e.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData
-            ) => true,
-            Err(e) => return Err(e.to_string()),
-        };
-        if need_write {
-            key.set_value(AUTOSTART_VALUE_NAME, &cmd)
-                .map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    } else {
-        match key.delete_value(AUTOSTART_VALUE_NAME) {
-            Ok(()) => Ok(()),
-            Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn apply_autostart(enable: bool) -> Result<(), String> {
-    use winreg::enums::{KEY_READ, KEY_SET_VALUE};
-    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
-    if enable {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let (key, _) = hkcu
-            .create_subkey(AUTOSTART_RUN_KEY)
-            .map_err(|e| e.to_string())?;
-        apply_autostart_in(&key, true, &exe)
-    } else {
-        // disable: a missing Run key means autostart is already off — opening
-        // with create_subkey here would materialize the key for nothing.
-        match hkcu.open_subkey_with_flags(AUTOSTART_RUN_KEY, KEY_READ | KEY_SET_VALUE) {
-            Ok(key) => apply_autostart_in(&key, false, std::path::Path::new("")),
-            Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn apply_autostart(_enable: bool) -> Result<(), String> {
-    Ok(())
-}
-
+/// Autostart toggle — the ONLY mutation path for autostart state (see
+/// autostart.rs). Startup itself never writes autostart; a legacy Run value
+/// from old versions keeps working until the user toggles.
 #[tauri::command]
 fn set_autostart(enabled: bool) -> Result<(), String> {
-    apply_autostart(enabled)?;
+    autostart::set_autostart(enabled)?;
     let mut s = settings::load();
     s.autostart = enabled;
     settings::save(&s).map_err(|e| e.to_string())
@@ -1178,8 +1105,7 @@ fn main() {
                 .build(app)?;
             poller::register_tray(tray);
 
-            // sync autostart registry key with persisted setting
-            let _ = apply_autostart(s.autostart);
+            // NOTE: startup deliberately performs NO autostart writes.
 
             // First-run ToS gate: zero network before consent. Until the user
             // agrees, the bar hides and the poller stays off; the ToS window
@@ -1318,127 +1244,8 @@ mod tests {
         assert!(!langid_is_chinese(0x0411)); // ja-JP
     }
 
-    // Autostart tests — confined to unique temporary HKCU subkeys (PID +
-    // atomic counter so parallel tests never share a path), NEVER the real
-    // Run key. Guard deletes exactly the temporary path it created.
-    #[cfg(target_os = "windows")]
-    struct TempKeyGuard {
-        full_path: String,
-    }
-    #[cfg(target_os = "windows")]
-    impl Drop for TempKeyGuard {
-        fn drop(&mut self) {
-            let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
-            let _ = hkcu.delete_subkey_all(&self.full_path);
-        }
-    }
-    #[cfg(target_os = "windows")]
-    static TEMP_KEY_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    #[cfg(target_os = "windows")]
-    fn temp_run_key() -> (TempKeyGuard, winreg::RegKey) {
-        let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
-        let n = TEMP_KEY_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let full_path = format!(
-            r"Software\QuotaBarAutostartTest_{}_{}",
-            std::process::id(),
-            n
-        );
-        let (key, _) = hkcu
-            .create_subkey(&full_path)
-            .expect("create temp test subkey");
-        (TempKeyGuard { full_path }, key)
-    }
-
-    /// Executable path must land in the Run value quoted — an unquoted path
-    /// containing spaces is loader-split and can run the wrong binary.
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn autostart_command_quotes_path() {
-        use std::path::Path;
-        assert_eq!(
-            autostart_command(Path::new(r"C:\Program Files\QuotaBar\quotabar.exe")),
-            r#""C:\Program Files\QuotaBar\quotabar.exe""#
-        );
-        assert_eq!(
-            autostart_command(Path::new(r"C:\plain\quotabar.exe")),
-            r#""C:\plain\quotabar.exe""#
-        );
-    }
-
-    /// Idempotent enable: writes once, second enable is a no-op decision
-    /// (stored command matches, no rewrite); enable stores the quoted path.
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn autostart_enable_idempotent() {
-        let (_guard, key) = temp_run_key();
-        let exe = std::path::Path::new(r"C:\Program Files\QuotaBar\quotabar.exe");
-        apply_autostart_in(&key, true, exe).unwrap();
-        assert_eq!(
-            key.get_value::<String, _>(AUTOSTART_VALUE_NAME).unwrap(),
-            autostart_command(exe)
-        );
-        // decision path: identical command must succeed without error
-        apply_autostart_in(&key, true, exe).unwrap();
-        assert_eq!(
-            key.get_value::<String, _>(AUTOSTART_VALUE_NAME).unwrap(),
-            autostart_command(exe)
-        );
-    }
-
-    /// No-rewrite proof via a read-only reopen: with the stored command
-    /// identical, enable must succeed without attempting a write (a write on
-    /// a KEY_READ-only handle would fail). With a different desired command,
-    /// the write attempt must surface as an error, not be swallowed.
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn autostart_enable_no_rewrite_proven_readonly() {
-        use winreg::enums::KEY_READ;
-        let (guard, key) = temp_run_key();
-        let exe = std::path::Path::new(r"C:\Program Files\QuotaBar\quotabar.exe");
-        apply_autostart_in(&key, true, exe).unwrap();
-        // reopen read-only; a write through this handle cannot succeed
-        let ro = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
-            .open_subkey_with_flags(&guard.full_path, KEY_READ)
-            .expect("reopen temp key read-only");
-        // same value: no write attempted → success on a read-only handle
-        apply_autostart_in(&ro, true, exe)
-            .expect("identical command must not attempt a write");
-        // different value: write is required but impossible → must error
-        assert!(
-            apply_autostart_in(&ro, true, std::path::Path::new(r"C:\other\quotabar.exe"))
-                .is_err(),
-            "changed command on read-only handle must propagate the write error"
-        );
-    }
-
-    /// Idempotent disable: deleting a missing value succeeds, deleting the
-    /// present value removes ONLY QuotaBar (siblings survive), and disabling
-    /// twice in a row never errors. Deleting a PRESENT value through a
-    /// read-only handle must error (deletion failures propagate).
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn autostart_disable_idempotent_and_scoped() {
-        use winreg::enums::KEY_READ;
-        let (guard, key) = temp_run_key();
-        // missing value: disable must succeed, must not create anything
-        apply_autostart_in(&key, false, std::path::Path::new("")).unwrap();
-        // enable, add a sibling value, disable: sibling must survive
-        apply_autostart_in(&key, true, std::path::Path::new(r"C:\x\q.exe")).unwrap();
-        key.set_value("OtherApp", &"kept").unwrap();
-        // read-only reopen: present value + impossible delete → must error
-        let ro = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
-            .open_subkey_with_flags(&guard.full_path, KEY_READ)
-            .expect("reopen temp key read-only");
-        assert!(
-            apply_autostart_in(&ro, false, std::path::Path::new("")).is_err(),
-            "disable of a present value on read-only handle must propagate the delete error"
-        );
-        apply_autostart_in(&key, false, std::path::Path::new("")).unwrap();
-        assert!(key.get_value::<String, _>(AUTOSTART_VALUE_NAME).is_err());
-        assert_eq!(key.get_value::<String, _>("OtherApp").unwrap(), "kept");
-        // second disable: value already gone, still success
-        apply_autostart_in(&key, false, std::path::Path::new("")).unwrap();
-    }
+    // Autostart behavior tests live in autostart.rs (Startup .lnk + legacy
+    // Run cleanup), confined to temp dirs / throwaway registry subkeys.
 
     #[test]
     fn lang_str_chinese_detection() {

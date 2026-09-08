@@ -81,13 +81,15 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 下载前请留意：
 
 - **默认版本仍是 v0.3.2**：GitHub 的 Latest 标记与原附件保留，beta.2 单独标为预发布；这些发布标记不代表杀毒检测结论。
-- **启动闪窗的源码修复尚未发包**：已补上 Antigravity 探测子进程的无控制台窗口标志，现有 beta.2 下载包不包含这项修复。它只针对闪窗，不代表 Defender 检测已解决。
-- **自启动行为正在收敛**：源码修正程序路径引号，避免重复写入相同自启动命令；关闭时只移除 QuotaBar 自身条目。这些正确性修复同样尚未包含在 beta.2 下载包中，检测原因及 Microsoft 复核状态以[处理记录](docs/windows-defender-20260909.md)为准。
+- **Windows 原生改造尚未发包**：源码已把 Antigravity 的 PowerShell 探测替换为原生 WMI/TCP 表读取，生成的任务钩子也不再使用 PowerShell 包装。现有 beta.2 下载包不包含这些改动，Defender 检测尚未解除。
+- **自启动改用 Startup 快捷方式**：当前源码不再在正常启动时写 Run 注册表项；设置动作管理用户 Startup 中的快捷方式，迁移匹配当前程序的旧项。同名冲突会保留并报错。升级与钩子迁移要求见[改造说明](docs/plans/windows-native-runtime.md)。
 - **检测排查进展**：beta.2 安装包在更新情报库后的本机静态扫描中未检出，构建来源验证通过；已隔离便携程序的检测仍待 Microsoft 复核，暂不据此解除 Windows 开发包提示。仓库提供只读脱敏取证脚本，使用方式见[检测记录](docs/windows-defender-20260909.md#可复用的本机取证)。
 - **两个版本共用同一份设置和数据**（`%APPDATA%\quotabar`），不做隔离。切换时同一时刻只跑一个 QuotaBar——退出旧的再开新的，单实例锁也会拦着你同时开俩。
 - ChatGPT 桌面端的 QuotaBar 插件目前需从源码单独打包，尚未随发布包提供，其桌面执行也未验证，见 [插件接入说明](docs/codex-plugin.md)。
 
 国内下载可查看 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)。镜像提供相同版本，Windows 检测提示同样适用。
+
+**Code signing policy**：[签名状态与申请计划](docs/code-signing-policy.md)。正在准备 SignPath 开源签名申请，目前未获批、未签名；MSIX 商店分发为备选方案，不代表当前检测已解除。
 
 ### 从源码构建
 
@@ -175,7 +177,7 @@ reset 字段自动识别 epoch 秒/毫秒/RFC3339。接进来就和内置五家�
 - 设置与状态：`%APPDATA%\quotabar\settings.json`（macOS：`~/Library/Application Support/quotabar/`）
 - 日志：同目录下 `spike.log`；用量历史：同目录下 `history.db`
 - 手动 key：Windows 凭据管理器（服务名 `quotabar`）/ macOS Keychain
-- 开机自启：设置里关（注册表 `HKCU\...\Run\QuotaBar`）
+- 开机自启：设置里关。当前源码改用用户 Startup 文件夹中的 `QuotaBar.lnk`；beta.2 及此前包仍使用 `HKCU\...\Run\QuotaBar`。升级后切换一次自启动设置，会清理指向当前程序的旧 Run 项；其他路径的同名项不会自动删除。
 
 删完这些就干净了。Antigravity 的凭据条目我们不动——那是人家的东西，借读已是承情。
 

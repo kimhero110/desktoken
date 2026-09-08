@@ -66,6 +66,16 @@ GitHub 与 Gitee beta.2 发布页已同步提示 Windows 检测待核查，暂�
 
 可直接用于表单的[英文复核说明](releases/beta2-microsoft-submission.md)已备妥，不包含本机账户、原始路径或凭据。
 
+## 后续源码改造：移除 Windows PowerShell 运行链
+
+按维护者要求，当前源码将 Antigravity 探测改为 Rust 调用 WMI 与 IP Helper TCP 表，将生成的 Codex 钩子改为原生接收器命令、Claude 钩子改为参数数组直启；ACL 测试也改用原生安全 API。正常启动不再写入自启动配置；用户设置动作改为管理 Startup 快捷方式，并清理匹配当前程序的旧 Run 值。冲突项保留并报告错误。
+
+已有旧 Run 项不会在普通启动时偷偷迁移，升级后需切换一次设置。旧 PowerShell 钩子也不会自动改变，需重新生成并完成客户端信任确认。维护用 `.ps1` 取证/发布脚本不由应用启动，此次没有把这些独立工具迁入主程序。具体方案见 [Windows 原生运行链](plans/windows-native-runtime.md)。
+
+上述源码改造不修改 beta.2 的既有哈希，不替代 WDSI 对旧样本的判定。签名申请状态单独记录在 [Code signing policy](code-signing-policy.md)。
+
+本地原生改造 release 构建完成，事件桥和生命周期测试通过；SHA-256 为 `a267daccfff0be097c2c3e01038914c9c5f42b431ef67d221924a236f4c44659`。在实时保护开启、安全情报 `1.459.111.0` 下，自定义扫描明确未检出，退出码 0。这不是对 beta.2 原始便携文件的复测，也不构成供应链完整审计或未来检测豁免。尚未发布此新产物。
+
 ## 可复用的本机取证
 
 运行 `scripts/collect-defender-evidence.ps1 -Days 7 -OutputPath <新的JSON路径>`，只读取 Defender 状态和与 QuotaBar 路径有关的 1116/1117 事件，不扫描、上传或修改保护设置。输出保留检测名称、时间、版本及资源分类布尔值，不保留原始路径、账户名、SID 或命令行。历史版本缺失时保留空值，不用当前版本填补。

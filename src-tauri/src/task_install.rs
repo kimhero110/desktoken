@@ -194,30 +194,107 @@ pub fn set_task_integration(tool: String, installed: bool) -> Result<InstallResu
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Native Windows security APIs only — the test must not shell out to
+    // PowerShell (native-cleanup goal: zero runtime PowerShell invocation).
     #[cfg(windows)]
     fn acl_sddl(path: &Path, protect: bool) -> String {
-        use std::os::windows::process::CommandExt;
-        let output=std::process::Command::new("powershell.exe")
-            .creation_flags(0x08000000)
-            .args(["-NoProfile","-NonInteractive","-Command",r#"
-                $ErrorActionPreference='Stop'
-                $acl=[System.IO.File]::GetAccessControl($env:QUOTABAR_ACL_FIXTURE)
-                if ($env:QUOTABAR_ACL_PROTECT -eq 'true') {
-                    $acl.SetAccessRuleProtection($true,$true)
-                    $sid=New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-546')
-                    $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'ReadData','Deny')
-                    $acl.AddAccessRule($rule)
-                    [System.IO.File]::SetAccessControl($env:QUOTABAR_ACL_FIXTURE,$acl)
-                    $acl=[System.IO.File]::GetAccessControl($env:QUOTABAR_ACL_FIXTURE)
-                }
-                $acl.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]'Access,Owner,Group')
-            "#])
-            .env("QUOTABAR_ACL_FIXTURE",path).env("QUOTABAR_ACL_PROTECT",protect.to_string())
-            .output().unwrap();
-        assert!(output.status.success(),"ACL fixture failed: {}",String::from_utf8_lossy(&output.stderr));
-        // CreateFile may clear the historical AUTO_INHERITED marker. Compare the owner,
-        // group, protection flag and all actual ACEs, including their inheritance flags.
-        String::from_utf8(output.stdout).unwrap().trim().replace("D:PAI", "D:P").replace("D:AI", "D:")
+        if protect {
+            protect_with_guests_read_deny(path);
+        }
+        // CreateFile may clear the historical AUTO_INHERITED marker. Compare
+        // the owner, group, protection flag and all actual ACEs, including
+        // their inheritance flags.
+        sddl_of(path).replace("D:PAI", "D:P").replace("D:AI", "D:")
+    }
+    /// Read a file's SDDL (owner+group+DACL) via GetFileSecurityW +
+    /// ConvertSecurityDescriptorToStringSecurityDescriptorW. Panics on failure
+    /// (fixture setup must never silently pass).
+    #[cfg(windows)]
+    fn sddl_of(path: &Path) -> String {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::ConvertSecurityDescriptorToStringSecurityDescriptorW;
+        use windows_sys::Win32::Security::{
+            GetFileSecurityW, DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION,
+            OWNER_SECURITY_INFORMATION,
+        };
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let info =
+            OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+        let mut needed = 0;
+        unsafe { GetFileSecurityW(wide.as_ptr(), info, std::ptr::null_mut(), 0, &mut needed) };
+        assert!(needed > 0, "GetFileSecurityW size probe failed");
+        let mut buf = vec![0u8; needed as usize];
+        assert_ne!(
+            unsafe { GetFileSecurityW(wide.as_ptr(), info, buf.as_mut_ptr().cast(), needed, &mut needed) },
+            0,
+            "GetFileSecurityW read failed"
+        );
+        let mut out = std::ptr::null_mut();
+        let mut len = 0u32;
+        assert_ne!(
+            unsafe {
+                ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                    buf.as_mut_ptr().cast(),
+                    1, // SDDL_REVISION_1
+                    info,
+                    &mut out,
+                    &mut len,
+                )
+            },
+            0,
+            "SDDL conversion failed"
+        );
+        let text = unsafe {
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(out, len as usize))
+                .trim_end_matches('\u{0}')
+                .to_string();
+            LocalFree(out.cast());
+            s
+        };
+        assert!(text.contains("D:"), "SDDL missing DACL: {text}");
+        text
+    }
+    /// Native equivalent of the old PowerShell fixture: protect the DACL from
+    /// inheritance (preserving the existing ACEs verbatim) and prepend a Deny
+    /// ReadData ACE for Guests (S-1-5-32-546), applied via SetFileSecurityW.
+    #[cfg(windows)]
+    fn protect_with_guests_read_deny(path: &Path) {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
+        use windows_sys::Win32::Security::{
+            SetFileSecurityW, DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION,
+            OWNER_SECURITY_INFORMATION,
+        };
+        let current = sddl_of(path);
+        let (prefix, aces) = match current.find('(') {
+            Some(i) => (&current[..i], &current[i..]),
+            None => panic!("fixture SDDL has no ACE list: {current}"),
+        };
+        let dacl = prefix.find("D:").unwrap_or_else(|| panic!("fixture SDDL missing DACL marker: {current}"));
+        // D:P = protected; deny ACE first (canonical order); inherited ACEs copied verbatim.
+        let next = format!("{}D:P(D;;FR;;;S-1-5-32-546){aces}", &prefix[..dacl]);
+        let sddl_wide: Vec<u16> = next.encode_utf16().chain(Some(0)).collect();
+        let mut sd = std::ptr::null_mut();
+        assert_ne!(
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl_wide.as_ptr(),
+                    1, // SDDL_REVISION_1
+                    &mut sd,
+                    std::ptr::null_mut(),
+                )
+            },
+            0,
+            "SDDL parse failed: {next}"
+        );
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let info =
+            OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+        let applied = unsafe { SetFileSecurityW(wide.as_ptr(), info, sd.cast()) };
+        unsafe { LocalFree(sd.cast()) };
+        assert_ne!(applied, 0, "SetFileSecurityW failed");
     }
     #[cfg(windows)]
     #[test]

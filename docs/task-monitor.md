@@ -14,7 +14,9 @@ QuotaBar 在额度之外增加“本机任务”页签，回答当前电脑上�
 7. 点击“检查接入”，分别查看默认配置文件匹配情况和最近收到事件的时间。配置缺失、不可读、JSON 无效、仅部分事件匹配、程序路径变化会分别提示。它不会检查账号登录或替你信任 hooks；自定义配置目录需手动核对。
 8. 点击“发送测试通知”，确认桌面或通知中心出现“QuotaBar · 测试通知”。显示“已提交给系统”仅表示通知 API 返回成功，不等于用户实际看见。
 
-配置使用当前 QuotaBar 可执行文件的绝对路径。移动程序或换安装位置后重新生成并安装；安装器借助接入记录移除旧的原样条目；固定路径原位更新无需修改。仅生成配置不会写入工具设置，“安装接入”按钮才写入。安装不更改授权策略，也不自动批准操作。Windows 配置通过 PowerShell EncodedCommand 安全传递程序路径；这是 UTF-16 编码的程序调用，不含网络脚本。
+配置使用当前 QuotaBar 可执行文件的绝对路径。移动程序或换安装位置后重新生成并安装；安装器借助接入记录移除旧的原样条目。仅生成配置不会写入工具设置，“安装接入”按钮才写入。安装不更改授权策略，也不自动批准操作。
+
+当前源码已移除 Windows PowerShell 包装：Codex 通过宿主的 Windows 命令执行机制调用带引号的原生接收器，Claude 使用 `command` 与 `args` 直接启动程序。Codex 对无法安全引用的路径字符明确报错。beta.2 旧配置仍使用 EncodedCommand；即使固定路径原位升级，也需要重新生成这一代钩子并完成客户端要求的信任确认。个人 QuotaBar 插件需重新生成插件内容，不能只更新用户级 hooks 后认为插件已迁移。新配置要求宿主支持对应字段；真实客户端信任和事件验收仍需独立核对。
 
 ## 安装、备份与恢复
 
@@ -86,7 +88,7 @@ OpenCode 按请求 ID 跟踪同会话内多个授权/提问；回复一个请求
 
 OpenCode 适配器只对少量生命周期事件同步调用接收器，单次上限 1.5 秒，不转发逐 token 消息。此处使用有界同步是为防止 CLI 退出丢失末尾事件；接收器失败仍不阻止工具继续运行。
 
-可重复验证：`cargo test --locked --manifest-path src-tauri/Cargo.toml`、`node --test tests/*.test.cjs`；Windows 构建后运行 `node scripts/test-task-bridge.cjs <exe路径>`，测试直接调用和生成的 PowerShell 输入链路。进程测试仅为子进程指定临时 APPDATA，结束后清理，不触碰真实配置。机器负载过高导致 hook 超时时，事件可能丢失，应按未知状态处理。
+可重复验证：`cargo test --locked --manifest-path src-tauri/Cargo.toml`、`node --test tests/*.test.cjs`；Windows 构建后运行 `node scripts/test-task-bridge.cjs <exe路径>`，测试原生直启与 Codex 命令链路，包含空格和中文路径。进程测试仅为子进程指定临时 APPDATA，结束后清理，不触碰真实配置。机器负载过高导致 hook 超时时，事件可能丢失，应按未知状态处理。
 
 真实会话测试（需现有登录，会消耗一次极短模型请求）：`node scripts/test-live-tasks.cjs opencode` 或 `claude`。测试报告及临时项目保留在 `src-tauri/target/live-tasks-*`，报告不含消息正文；未收到结束及其通知候选时退出码为 2。
 
@@ -104,7 +106,7 @@ OpenCode 适配器只对少量生命周期事件同步调用接收器，单次�
 
 ## 可重复的本地验收
 
-运行 `node scripts/test-task-lifecycle.cjs [exe路径]`：使用隔离 APPDATA，调用实际生成的 Codex/Claude PowerShell hook 和 OpenCode 插件，再由原生接收器、状态机处理。覆盖三个并行会话、并行授权部分回复、恢复、结束/失败保护和新一轮提醒，断言共 7 个通知候选且无敏感正文。报告保存到 `src-tauri/target/lifecycle-*/report.json`。此测试不调用模型、不修改工具配置，不替代真实 CLI 接入和系统弹窗验收。Windows CI 自动执行此测试及事件桥冒烟测试。
+运行 `node scripts/test-task-lifecycle.cjs [exe路径]`：使用隔离 APPDATA，调用实际生成的 Codex 命令钩子、Claude 参数数组直启钩子和 OpenCode 插件，再由原生接收器、状态机处理。覆盖三个并行会话、并行授权部分回复、恢复、结束/失败保护和新一轮提醒，断言共 7 个通知候选且无敏感正文。报告保存到 `src-tauri/target/lifecycle-*/report.json`。此测试不调用模型、不修改工具配置，不替代真实 CLI 接入和系统弹窗验收。Windows CI 自动执行此测试及事件桥冒烟测试。
 
 真实 OpenCode 授权验收仅在拒绝请求后正常结束、等待与结束通知各一次时通过；出现 failed、漏发或重复通知均失败。失败报告也保存到临时测试目录。
 
@@ -127,7 +129,7 @@ v0.4.0-beta.1 命令行安装入口：`quotabar task-install codex|claude|openco
 
 ### 延迟构成（依据代码，非实测端到端数据）
 
-事件到面板可见的延迟由多段叠加：UserPromptSubmit / PreToolUse / PostToolUse 等事件触发"正在工作"状态；hook 进程（PowerShell 启动加可执行文件启动）与宿主分发本身先消耗一段时间；接收器把事件以临时文件重命名写入本地 spool，桌面程序每 750 毫秒轮询一次该目录，轮询间隔加循环内工作与调度构成主要常驻延迟；随后前端通过 `tasks://snapshot` 收到快照并立即渲染。配置中 hook 的 3 秒 timeout 是失败超时，不是 UI 时效保证。等待/结束类提醒通知另有 2 秒去抖，与面板即时状态相互独立；前端每 30 秒的刷新只更新年龄标签，不参与事件摄取。以上均为代码结构说明，没有实测端到端延迟数据。用户报告面板现已恢复正常；本次未能定位此前不更新的原因，不能据此断言只是正常延迟。
+事件到面板可见的延迟由多段叠加：UserPromptSubmit / PreToolUse / PostToolUse 等事件触发"正在工作"状态；hook 进程（宿主分发加原生接收器启动；旧版配置另有 PowerShell 启动开销）与宿主分发本身先消耗一段时间；接收器把事件以临时文件重命名写入本地 spool，桌面程序每 750 毫秒轮询一次该目录，轮询间隔加循环内工作与调度构成主要常驻延迟；随后前端通过 `tasks://snapshot` 收到快照并立即渲染。配置中 hook 的 3 秒 timeout 是失败超时，不是 UI 时效保证。等待/结束类提醒通知另有 2 秒去抖，与面板即时状态相互独立；前端每 30 秒的刷新只更新年龄标签，不参与事件摄取。以上均为代码结构说明，没有实测端到端延迟数据。用户报告面板现已恢复正常；本次未能定位此前不更新的原因，不能据此断言只是正常延迟。
 
 已信任的现有配置不会因此自动更新：新增 `statusMessage` 会改变 hook 定义进而改变信任哈希，信任哈希变更必须由用户重新审阅信任，安装器与诊断脚本均不写信任记录、不提供绕过。用户需在重新生成并安装配置后，按正常流程再次审阅信任。
 
