@@ -12,8 +12,9 @@
 //    Returns groups → buckets {window: "weekly"|"5h", remainingFraction,
 //    resetTime} — exactly what the IDE panel shows.
 //    Discovery: the LS listens on random loopback ports; we resolve port +
-//    CSRF token from the running process (PowerShell CIM + TCP table), once
-//    per poll (5 min cadence — cheap and self-healing across IDE restarts).
+//    CSRF token from the running process (WMI process query + native TCP
+//    table, no shell invocation), once per poll (5 min cadence — cheap and
+//    self-healing across IDE restarts).
 //    IDE not running → IdeNotRunning row (honest, instead of a wrong number).
 //
 // Poll interval clamped to >= 5 min (PLAN.md decision #12).
@@ -63,34 +64,126 @@ struct LsEndpoint {
 /// command line, loopback listen ports from the TCP table.
 #[cfg(target_os = "windows")]
 fn discover_ls() -> Option<LsEndpoint> {
-    const SCRIPT: &str = r#"
-$p = Get-CimInstance Win32_Process -Filter "Name='language_server.exe'" |
-     Where-Object { $_.CommandLine -match '--override_ide_name antigravity' } |
-     Select-Object -First 1
-if (-not $p) { exit 1 }
-$ports = (Get-NetTCPConnection -OwningProcess $p.ProcessId -State Listen -ErrorAction SilentlyContinue |
-          Where-Object { $_.LocalAddress -eq '127.0.0.1' } |
-          Select-Object -ExpandProperty LocalPort) -join ','
-$csrf = ([regex]::Match($p.CommandLine, '--csrf_token ([0-9a-fA-F-]+)')).Groups[1].Value
-"$ports|$csrf"
-"#;
-    let out = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
-        .output()
+    // COM/WMI runs on the tokio blocking thread (spawn_blocking in
+    // fetch_via_ls). One narrow query: name + command line only. We never
+    // open the process or read its memory — WMI hands us the string.
+    let com = wmi::COMLibrary::new().ok()?;
+    let con = wmi::WMIConnection::new(com).ok()?;
+    let procs: Vec<std::collections::HashMap<String, wmi::Variant>> = con
+        .raw_query(
+            "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'language_server.exe'",
+        )
         .ok()?;
-    if !out.status.success() {
-        return None;
+    fn field<'a>(
+        p: &'a std::collections::HashMap<String, wmi::Variant>,
+        name: &str,
+    ) -> Option<&'a wmi::Variant> {
+        p.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v)
     }
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let (ports, csrf) = text.split_once('|')?;
-    let ports: Vec<u16> = ports.split(',').filter_map(|p| p.parse().ok()).collect();
-    if ports.is_empty() || csrf.is_empty() {
-        return None;
+    for p in &procs {
+        let Some(wmi::Variant::String(cmd)) = field(p, "commandline") else {
+            continue;
+        };
+        if !cmd.contains("--override_ide_name antigravity") {
+            continue;
+        }
+        let Some(pid) = field(p, "processid")
+            .and_then(|v| match v {
+                wmi::Variant::UI4(n) => Some(u64::from(*n)),
+                wmi::Variant::I4(n) => u64::try_from(*n).ok(),
+                wmi::Variant::UI8(n) => Some(*n),
+                wmi::Variant::I8(n) => u64::try_from(*n).ok(),
+                wmi::Variant::String(s) => s.trim().parse::<u64>().ok(),
+                _ => None,
+            })
+            .filter(|n| *n != 0 && *n <= u32::MAX as u64)
+        else {
+            continue;
+        };
+        let Some(csrf) = extract_csrf(cmd) else {
+            continue;
+        };
+        let ports = loopback_listen_ports(pid as u32);
+        if ports.is_empty() {
+            return None;
+        }
+        return Some(LsEndpoint { ports, csrf });
     }
-    Some(LsEndpoint {
-        ports,
-        csrf: csrf.to_string(),
-    })
+    None
+}
+
+/// `--csrf_token <0-9a-fA-F->+` from the LS command line (pure helper).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))] // tests on all platforms
+fn extract_csrf(cmd: &str) -> Option<String> {
+    let rest = cmd.split("--csrf_token ").nth(1)?;
+    let tok: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit() || *c == '-')
+        .collect();
+    if tok.is_empty() {
+        None
+    } else {
+        Some(tok)
+    }
+}
+
+/// Loopback (127.0.0.1) TCP ports in LISTEN state owned by `pid`, via the
+/// native IP Helper owner-PID table (no shell, no sockets opened).
+#[cfg(target_os = "windows")]
+fn loopback_listen_ports(pid: u32) -> Vec<u16> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
+    };
+    // Reasonable allocation ceiling: the listener table is tiny in practice.
+    const MAX_TABLE_BYTES: u32 = 4 * 1024 * 1024;
+    let mut size = 0u32;
+    unsafe {
+        GetExtendedTcpTable(
+            std::ptr::null_mut(),
+            &mut size,
+            0,
+            2, // AF_INET
+            TCP_TABLE_OWNER_PID_LISTENER,
+            0,
+        );
+    }
+    if size == 0 || size > MAX_TABLE_BYTES {
+        return vec![];
+    }
+    // u32-aligned storage: the table is a u32 length + u32 rows, and Vec<u32>
+    // guarantees the alignment GetExtendedTcpTable writes require.
+    let mut buf: Vec<u32> = vec![0; size.div_ceil(4) as usize];
+    let rc = unsafe {
+        GetExtendedTcpTable(
+            buf.as_mut_ptr().cast(),
+            &mut size,
+            0,
+            2, // AF_INET
+            TCP_TABLE_OWNER_PID_LISTENER,
+            0,
+        )
+    };
+    if rc != 0 {
+        return vec![];
+    }
+    let table = buf.as_ptr().cast::<MIB_TCPTABLE_OWNER_PID>();
+    let count = unsafe { (*table).dwNumEntries } as usize;
+    // dwNumEntries is kernel-snapshot data; never trust it beyond the buffer
+    // we actually provided (table = u32 count + N rows, repr(C)).
+    let row_u32s =
+        (std::mem::size_of::<MIB_TCPTABLE_OWNER_PID>() - std::mem::size_of::<u32>())
+            / std::mem::size_of::<u32>();
+    let max_rows = buf.len().saturating_sub(1) / row_u32s.max(1);
+    let count = count.min(max_rows);
+    // dwLocalAddr/dwLocalPort are stored in network byte order.
+    const LOOPBACK: u32 = 0x0100_007F; // 127.0.0.1 as native LE u32
+    let rows = unsafe { std::slice::from_raw_parts((*table).table.as_ptr(), count) };
+    rows.iter()
+        .filter(|r| r.dwOwningPid == pid && r.dwLocalAddr == LOOPBACK)
+        .map(|r| u16::from_be((r.dwLocalPort & 0xFFFF) as u16))
+        .collect()
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -463,6 +556,21 @@ mod tests {
     }
 
     // ---- Antigravity LS channel ----
+
+    #[test]
+    fn extracts_csrf_token_from_command_line() {
+        let cmd = r#""C:\x\language_server.exe" --override_ide_name antigravity --csrf_token 3f2a-9B1c-44de --serve_https"#;
+        assert_eq!(
+            extract_csrf(cmd).as_deref(),
+            Some("3f2a-9B1c-44de")
+        );
+        // token terminated by a non-hex char — same as the old CIM regex, a
+        // quoted token does not match
+        assert_eq!(extract_csrf(r#"exe --csrf_token "deadbeef" --x"#), None);
+        // missing flag / empty token
+        assert_eq!(extract_csrf("exe --override_ide_name antigravity"), None);
+        assert_eq!(extract_csrf("exe --csrf_token zz"), None);
+    }
 
     #[test]
     fn parses_ls_quota_summary() {

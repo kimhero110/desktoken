@@ -29,6 +29,7 @@ fn is_zh_locale() -> bool {
         || lang_str_is_chinese(&std::env::var("LC_ALL").unwrap_or_default())
 }
 mod settings;
+mod autostart;
 mod credentials;
 mod diagnostics;
 mod fetch;
@@ -437,32 +438,14 @@ fn decline_tos(app: tauri::AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// Autostart (HKCU Run key) + misc commands
+// Misc commands
 // ---------------------------------------------------------------------------
-#[cfg(target_os = "windows")]
-fn apply_autostart(enable: bool) -> Result<(), String> {
-    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
-    let (key, _) = hkcu
-        .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
-        .map_err(|e| e.to_string())?;
-    if enable {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        key.set_value("QuotaBar", &exe.to_string_lossy().to_string())
-            .map_err(|e| e.to_string())?;
-    } else {
-        let _ = key.delete_value("QuotaBar");
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn apply_autostart(_enable: bool) -> Result<(), String> {
-    Ok(())
-}
-
+/// Autostart toggle — the ONLY mutation path for autostart state (see
+/// autostart.rs). Startup itself never writes autostart; a legacy Run value
+/// from old versions keeps working until the user toggles.
 #[tauri::command]
 fn set_autostart(enabled: bool) -> Result<(), String> {
-    apply_autostart(enabled)?;
+    autostart::set_autostart(enabled)?;
     let mut s = settings::load();
     s.autostart = enabled;
     settings::save(&s).map_err(|e| e.to_string())
@@ -1095,8 +1078,8 @@ fn main() {
                 .build(app)?;
             poller::register_tray(tray);
 
-            // sync autostart registry key with persisted setting
-            let _ = apply_autostart(s.autostart);
+            // NOTE: startup never writes autostart state (autostart.rs);
+            // mutation happens only on the user's explicit settings toggle.
 
             // First-run ToS gate: zero network before consent. Until the user
             // agrees, the bar hides and the poller stays off; the ToS window
