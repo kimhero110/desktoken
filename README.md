@@ -70,6 +70,7 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 | 功能 | 只管额度 | 额度 + 本机任务状态（预览） |
 | 任务接入 | 无 | 可选工具钩子，装完还需在工具里审核信任 |
 | 发布页 | [v0.3.2](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2) | [v0.4.0-beta.2](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2) |
+| Gitee 镜像 | [稳定版下载](https://gitee.com/xu512/quotabar/releases/tag/v0.3.2) | [开发预览版下载](https://gitee.com/xu512/quotabar/releases/tag/v0.4.0-beta.2) |
 | Windows 安装包 | [QuotaBar_0.3.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/QuotaBar_0.3.2_x64-setup.exe)（自动处理 WebView2） | [QuotaBar_0.4.0-beta.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.2/QuotaBar_0.4.0-beta.2_x64-setup.exe)（同款安装体验） |
 | Windows 绿色版 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/quotabar.exe)，扔哪儿跑哪儿 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.2/quotabar.exe)，绿色单文件 |
 | macOS | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2)自取 DMG（架构见文件名） | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2)自取 DMG（架构见文件名） |
