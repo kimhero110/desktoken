@@ -63,16 +63,26 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 ### 下载（推荐）
 
-[GitHub Releases](https://github.com/kimhero110/desktoken/releases)（国内慢就用 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)）：
+日常看额度选稳定版，想试本机任务选开发预览版：
 
-- **Windows**：`QuotaBar_x64-setup.exe`（安装包，自动处理 WebView2）或 `quotabar.exe`（绿色单文件，扔哪儿跑哪儿）
-- **macOS**：`QuotaBar_x64.dmg`（拖进 Applications 即可）
+| | **稳定版 v0.3.2**（推荐日常） | **开发预览版 v0.4.0-beta.2**（尝鲜测试） |
+|---|---|---|
+| 功能 | 只管额度 | 额度 + 本机任务状态（预览） |
+| 任务接入 | 无 | 可选工具钩子，装完还需在工具里审核信任 |
+| 发布页 | [v0.3.2](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2) | [v0.4.0-beta.2](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2) |
+| Windows 安装包 | [QuotaBar_0.3.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/QuotaBar_0.3.2_x64-setup.exe)（自动处理 WebView2） | [QuotaBar_0.4.0-beta.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.2/QuotaBar_0.4.0-beta.2_x64-setup.exe)（同款安装体验） |
+| Windows 绿色版 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/quotabar.exe)，扔哪儿跑哪儿 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.2/quotabar.exe)，绿色单文件 |
+| macOS | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2)自取 DMG（架构见文件名） | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2)自取 DMG（架构见文件名） |
 
-国内下载慢：链接前面拼你常用的 GitHub 加速镜像即可，文件在 Release 附件里，镜像站通用。
+下载前请留意：
 
-**SmartScreen 那一拦**：没买几百刀一年的签名证书，所以 Windows 会装模作样地保护你一下。点「更多信息」→「仍要运行」。不放心的同学：每个 Release 带 `checksums.txt`（SHA-256）和 GitHub 官方构建证明（Attestations），可核对这文件确实是 CI 从源码编的，不是谁半夜传的。
+- **默认下载仍是稳定版**：beta 按预发布标注，不抢 Latest 的位置，要尝鲜请认准版本号自己点。
+- **两个版本共用同一份设置和数据**（`%APPDATA%\quotabar`），不做隔离。切换时同一时刻只跑一个 QuotaBar——退出旧的再开新的，单实例锁也会拦着你同时开俩。
+- ChatGPT 桌面端的 QuotaBar 插件目前需从源码单独打包，尚未随发布包提供，其桌面执行也未验证，见 [插件接入说明](docs/codex-plugin.md)。
 
-想试「本机任务」，请选 [v0.4.0-beta.1 预览版](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.1)；v0.3.2 稳定版只管额度。ChatGPT 桌面端的 QuotaBar 插件目前需从源码单独打包，尚未随发布包提供，见 [插件接入说明](docs/codex-plugin.md)。
+国内下载慢：用 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)，或在链接前面拼你常用的 GitHub 加速镜像，文件在 Release 附件里，镜像站通用。
+
+**SmartScreen 那一拦**：没买几百刀一年的签名证书，所以 Windows 会装模作样地保护你一下。点「更多信息」→「仍要运行」。不放心的同学：每个 Release 带 `checksums*.txt`（SHA-256）和 GitHub 官方构建证明（Attestations），可核对这文件确实是 CI 从源码编的，不是谁半夜传的。
 
 ### 从源码构建
 
