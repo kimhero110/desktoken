@@ -65,27 +65,29 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 稳定版保留额度功能，开发预览版增加本机任务。想安心看额度，选稳定版；想体验任务状态，选 beta.3。两个版本的下载包都保留。
 
+> **稳定版 v0.3.3（2026-09-09）**：额度功能不变，仅把 Antigravity 探测改为原生 WMI/TCP API、自启改为 Startup 快捷方式（与 beta.3 同源改造）。89 项 Rust 与 4 项前端测试通过；本机测试包与正式 CI 分发目录均通过 Defender 扫描，尚未报告真实稳定版 UI 验收；扫描不代表所有环境的检测结果。
+
 > **Windows 检测进展（2026-09-09）**：beta.3 改用原生 Windows API 和 Startup 快捷方式。本机测试包已通过 Defender 扫描，用户实测启动不闪黑窗、未被拦截；这不代表所有环境均无拦截，也不代表微软已确认旧版误报。旧 beta.2 的检测提示继续保留，详见[检测记录](docs/windows-defender-20260909.md)。
 
-| | **稳定版 v0.3.2** | **开发预览版 v0.4.0-beta.3** |
+| | **稳定版 v0.3.3** | **开发预览版 v0.4.0-beta.3** |
 |---|---|---|
 | 功能 | 只管额度 | 额度 + 本机任务状态（预览） |
 | 适合谁 | 日常使用额度面板 | 愿意体验并反馈任务状态的新功能 |
 | 任务接入 | 无 | 可选钩子，安装后还需在工具里审核信任 |
-| 发布页 | [v0.3.2](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2) | [v0.4.0-beta.3](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.3) |
-| Gitee 镜像 | [稳定版下载](https://gitee.com/xu512/quotabar/releases/tag/v0.3.2) | [开发预览版下载](https://gitee.com/xu512/quotabar/releases/tag/v0.4.0-beta.3) |
-| Windows 安装包 | [QuotaBar_0.3.2_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/QuotaBar_0.3.2_x64-setup.exe)（自动处理 WebView2） | [QuotaBar_0.4.0-beta.3_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.3/QuotaBar_0.4.0-beta.3_x64-setup.exe) |
-| Windows 绿色版 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.2/quotabar.exe)，绿色单文件 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.3/quotabar.exe)，绿色单文件 |
-| macOS | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2)自取 DMG | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.3)自取 DMG；本轮修复聚焦 Windows，macOS 未实机验收 |
+| 发布页 | [v0.3.3](https://github.com/kimhero110/desktoken/releases/tag/v0.3.3) | [v0.4.0-beta.3](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.3) |
+| Gitee 镜像 | [稳定版下载](https://gitee.com/xu512/quotabar/releases/tag/v0.3.3) | [开发预览版下载](https://gitee.com/xu512/quotabar/releases/tag/v0.4.0-beta.3) |
+| Windows 安装包 | [QuotaBar_0.3.3_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.3/QuotaBar_0.3.3_x64-setup.exe)（自动处理 WebView2） | [QuotaBar_0.4.0-beta.3_x64-setup.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.3/QuotaBar_0.4.0-beta.3_x64-setup.exe)（自动处理 WebView2） |
+| Windows 绿色版 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.3.3/quotabar.exe)，绿色单文件 | [quotabar.exe](https://github.com/kimhero110/desktoken/releases/download/v0.4.0-beta.3/quotabar.exe)，绿色单文件 |
+| macOS | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.3.3)自取 DMG | [发布页](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.3)自取 DMG；本轮修复聚焦 Windows，macOS 未实机验收 |
 
 下载前请留意：
 
-- **默认版本仍是 v0.3.2**：GitHub 的 Latest 与原附件保留，beta.3 单独标为预发布。发布标记不代表杀毒检测结论，当前 Windows 程序尚未签名。
+- **默认版本已是 v0.3.3**：GitHub 的 Latest 指向 v0.3.3，v0.3.2 及原附件仍保留可取。发布标记不代表杀毒检测结论，当前 Windows 程序尚未签名。
 - **从 beta.2 升级需要重新生成钩子**：原来的 PowerShell 包装不会因替换 exe 自动消失。更新用户钩子后，在桌面端 Hooks 设置中重新审核信任；个人 QuotaBar 插件也需要重新生成，不能只更新用户钩子。两种接法选一种即可。
 - **自启动改用 Startup 快捷方式**：正常启动不再写 Run 注册表项；调整自启开关时才管理快捷方式并清理匹配当前程序的旧项。同名冲突会保留并报错，见[改造说明](docs/plans/windows-native-runtime.md)。
 - **两个版本共用设置和数据**（`%APPDATA%\quotabar`）。切换时先从托盘退出旧版，再启动新版；单实例机制会拦住同时运行的第二个程序。
 - **任务验收范围**：本地事件桥和生命周期自动化测试通过；本轮用户确认了启动与 Defender 表现，迁移后的真实桌面任务完整状态流仍待验收。插件需从源码单独打包，见[插件接入说明](docs/codex-plugin.md)。
-- **旧包保留记录**：[beta.2](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2) 曾被 Defender 拦截，复核结论未确认，暂不建议运行。不要关闭防护或添加排除项绕过。
+- **旧包保留记录**：[v0.3.2](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2) 稳定包继续保留可取；[beta.2](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2) 曾被 Defender 拦截，复核结论未确认，暂不建议运行。不要关闭防护或添加排除项绕过。
 
 国内下载可查看 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)。[签名状态与申请计划](docs/code-signing-policy.md)：SignPath 尚未获批，MSIX 商店分发是备选方案。
 

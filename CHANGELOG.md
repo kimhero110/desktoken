@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.3 (2026-09-09，稳定版)
+
+- 稳定版维护：仅额度功能，Antigravity 探测改原生 WMI/TCP API，自启改 Startup 快捷方式（源自 fix/stable-windows-native，与 beta.3 同源改造；该分支独立于主线，未合并产品代码）。
+- 验证：89 项 Rust、4 项前端测试通过；本机稳定版测试包通过 Defender 扫描。正式 CI 产物目录亦通过本机 Defender 扫描，哈希与构建来源验证通过；真实稳定版 UI 验收尚未报告。
+
 ## v0.4.0-beta.3 (2026-09-09，预览版)
 
 - Windows Antigravity 探测使用原生 WMI/TCP API；任务钩子移除 PowerShell 包装。
