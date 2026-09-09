@@ -64,14 +64,14 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 [GitHub Releases](https://github.com/kimhero110/desktoken/releases)（国内慢就用 [Gitee 镜像仓](https://gitee.com/xu512/quotabar/releases)）：
 
-- **Windows**：`QuotaBar_x64-setup.exe`（安装包，自动处理 WebView2）或 `quotabar.exe`（绿色单文件，扔哪儿跑哪儿）
-- **macOS**：`QuotaBar_x64.dmg`（拖进 Applications 即可）
+- **Windows**：`QuotaBar_0.3.3_x64-setup.exe`（安装包，自动处理 WebView2）或 `quotabar.exe`（绿色单文件，扔哪儿跑哪儿）
+- **macOS**：`QuotaBar_0.3.3_<arch>.dmg`（架构以 Release 附件实际文件名为准，拖进 Applications 即可）
 
 国内下载慢：链接前面拼你常用的 GitHub 加速镜像即可，文件在 Release 附件里，镜像站通用。
 
-**SmartScreen 那一拦**：没买几百刀一年的签名证书，所以 Windows 会装模作样地保护你一下。点「更多信息」→「仍要运行」。不放心的同学：每个 Release 带 `checksums.txt`（SHA-256）和 GitHub 官方构建证明（Attestations），可核对这文件确实是 CI 从源码编的，不是谁半夜传的。
+**未签名提示**：无代码签名证书，Windows 安装/首启时可能出现 SmartScreen 或安全警告，是否继续由你决定。每个 Release 附 `checksums-*.txt`（SHA-256）与构建来源证明（Attestations），可用于核对文件完整性与构建来源；二者证明的是「文件未被篡改、确实由 CI 从源码产出」，**不等于无恶意代码的担保**。
 
-> **0.3.3 stable 本地测试版**：回移了「原生进程发现（不再拉起 PowerShell 子进程）」与「Startup 文件夹自启（启动时不再写注册表）」两项修复，仅出本地测试包、尚未发布（无公开下载链接）；绿色 exe 直接替换、安装包覆盖安装均沿用旧版资产。详见 [v0.3.3 发布说明](docs/releases/v0.3.3.md)。
+> **0.3.3（当前 stable）**：维护版，回移「原生进程发现（不再拉起 PowerShell 子进程）」与「Startup 文件夹自启（启动时不再写注册表）」两项修复；详见 [v0.3.3 发布说明](docs/releases/v0.3.3.md)。上一个 stable：[v0.3.2](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2)。想要**任务监视**的同学：它只在 beta 线的 [v0.4.0-beta.3](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.3) 里，stable 线没有这个功能。stable 的实机 UI、自启动开关与 Antigravity 端到端表现暂无已报告的验证结果。
 
 ### 从源码构建
 
