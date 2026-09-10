@@ -6,11 +6,26 @@ on:
   pull_request:
 
 jobs:
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        run: |
+          cd src-tauri
+          cargo fmt --check
+
   test:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
@@ -19,6 +34,10 @@ jobs:
           node-version: 22
       - name: Frontend regression tests
         run: node --test tests/*.test.cjs
+      - name: Clippy
+        run: |
+          cd src-tauri
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Test
         run: |
           cd src-tauri
