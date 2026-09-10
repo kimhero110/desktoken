@@ -177,27 +177,13 @@ fn pending_writes() -> &'static std::sync::Mutex<std::collections::HashMap<PathB
     PENDING.get_or_init(Default::default)
 }
 
-/// Atomic write-back: write sibling tmp file, then rename over the original
-/// with bounded retries (Windows file-lock tolerance). Failure here is NOT
-/// fatal to the caller — the token still works in memory.
+/// Atomic write-back through atomic_file::replace, which carries the
+/// credential file's own permissions/DACL onto the replacement. A plain
+/// tmp+rename handed a freshly rotated OAuth token back at 0644. Failure here
+/// is NOT fatal to the caller — the token still works in memory.
 fn write_back(path: &Path, doc: &Value, attempts: u32, base_delay_ms: u64) -> Result<(), ()> {
-    let body = serde_json::to_string_pretty(doc).map_err(|_| ())?;
-    let tmp = path.with_extension("desktoken-tmp");
-    std::fs::write(&tmp, body).map_err(|_| ())?;
-    let mut delay = std::time::Duration::from_millis(base_delay_ms);
-    for attempt in 0..attempts {
-        match std::fs::rename(&tmp, path) {
-            Ok(_) => return Ok(()),
-            Err(_) => {
-                if attempt + 1 < attempts {
-                    std::thread::sleep(delay);
-                    delay *= 2;
-                }
-            }
-        }
-    }
-    let _ = std::fs::remove_file(&tmp);
-    Err(())
+    let body = serde_json::to_vec_pretty(doc).map_err(|_| ())?;
+    crate::atomic_file::replace(path, &body, attempts, base_delay_ms).map_err(|_| ())
 }
 
 /// Resolve a usable access token for an OAuth-file credential provider.
@@ -408,6 +394,26 @@ pub(crate) mod tests {
             Ok(ok_result("renewed"))
         }, 0, 0).await.unwrap();
         assert_eq!(token, "renewed");
+    }
+
+    /// Regression: write-back created the temp file with std::fs::write, whose
+    /// default mode is 0644, so refreshing a token widened a 0600 credential
+    /// file for every other local account.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_back_preserves_credential_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir("perms");
+        let p = dir.join("cred.json");
+        write_cred(&p, "old", "old-rt", now_secs() - 10);
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let (t, _) = resolve_oauth_token(&p, &SPEC, |_| async { Ok(ok_result("new")) })
+            .await
+            .unwrap();
+        assert_eq!(t, "new");
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "a rotated token must not widen the credential file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

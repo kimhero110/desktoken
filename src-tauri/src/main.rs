@@ -32,6 +32,7 @@ mod settings;
 mod task_monitor;
 mod task_integration;
 mod task_install;
+mod atomic_file;
 mod autostart;
 mod credentials;
 mod diagnostics;
