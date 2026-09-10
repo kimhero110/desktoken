@@ -447,11 +447,15 @@ fn decline_tos(app: tauri::AppHandle) {
 /// autostart.rs). Startup itself never writes autostart; a legacy Run value
 /// from old versions keeps working until the user toggles.
 #[tauri::command]
-fn set_autostart(enabled: bool) -> Result<(), String> {
-    autostart::set_autostart(enabled)?;
-    let mut s = settings::load();
-    s.autostart = enabled;
-    settings::save(&s).map_err(|e| e.to_string())
+fn set_autostart(enabled: bool) -> Result<Option<String>, String> {
+    // Err means autostart::set_autostart changed nothing, so the stored flag
+    // must not move either. Ok may still carry a warning about a leftover we
+    // deliberately did not touch.
+    let warning = autostart::set_autostart(enabled)?;
+    // try_edit, not load/save: the poller edits settings concurrently, and a
+    // bare read-modify-write outside WRITE_LOCK drops the other side's change.
+    settings::try_edit(|s| s.autostart = enabled).map_err(|e| e.to_string())?;
+    Ok(warning)
 }
 
 #[tauri::command]

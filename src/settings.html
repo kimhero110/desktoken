@@ -73,6 +73,7 @@
     <input type="checkbox" id="autostart" />
     <label for="autostart" style="margin:0">开机自动启动</label>
   </div>
+  <div id="autostart-result" class="verify-result"></div>
 </div>
 
 <h2>本机任务 · 试验功能</h2>
@@ -360,7 +361,21 @@
     } catch (err) { el.textContent = "检查失败"; }
     setTimeout(() => { el.textContent = "检查更新"; }, 4000);
   });
-  $("autostart").addEventListener("change", () => invoke("set_autostart", { enabled: $("autostart").checked }));
+  $("autostart").addEventListener("change", async () => {
+    const box = $("autostart");
+    const result = $("autostart-result");
+    const wanted = box.checked;
+    result.className = "verify-result"; result.textContent = "";
+    try {
+      // Ok may carry a warning: the toggle applied, but something was left alone.
+      const warning = await invoke("set_autostart", { enabled: wanted });
+      if (warning) { result.className = "verify-result err"; result.textContent = warning; }
+    } catch (e) {
+      // Err means nothing changed on disk — put the checkbox back.
+      box.checked = !wanted;
+      result.className = "verify-result err"; result.textContent = String(e);
+    }
+  });
   loadProviders();
   loadCustoms();
 </script>
