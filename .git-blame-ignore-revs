@@ -1,0 +1,7 @@
+# Revisions to skip when running git blame: they only reformat, never
+# change behavior. GitHub honors this file automatically. Locally, run
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# once to get the same effect.
+
+# chore: cargo fmt the whole crate
+244018ac6e83b617e01be8e25ace22a95b85bd10
