@@ -552,11 +552,17 @@ mod tests {
         let old = own("old receiver");
         let new = own("new receiver");
         let base=serde_json::json!({"env":{"SECRET":"keep"},"hooks":{"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"user hook"}]}]}}).to_string();
-        let first = merge(Some(base.as_bytes()), &[old.clone()], &old, true).unwrap();
+        let first = merge(
+            Some(base.as_bytes()),
+            std::slice::from_ref(&old),
+            &old,
+            true,
+        )
+        .unwrap();
         let updated = merge(Some(&first), &[old, new.clone()], &new, true).unwrap();
-        let repeated = merge(Some(&updated), &[new.clone()], &new, true).unwrap();
+        let repeated = merge(Some(&updated), std::slice::from_ref(&new), &new, true).unwrap();
         assert_eq!(updated, repeated);
-        let removed = merge(Some(&updated), &[new.clone()], &new, false).unwrap();
+        let removed = merge(Some(&updated), std::slice::from_ref(&new), &new, false).unwrap();
         assert_eq!(
             serde_json::from_slice::<Value>(&removed).unwrap(),
             serde_json::from_str::<Value>(&base).unwrap()
@@ -581,9 +587,20 @@ mod tests {
             let groups:Vec<Value>=(0..n%7).map(|i| serde_json::json!({"matcher":format!("tool{i}"),"hooks":[{"type":"command","command":format!("user{i}"),"timeout":n+1}]})).collect();
             let base = serde_json::json!({"permissions":{"allow":[format!("read{n}")]},"hooks":{"OtherEvent":groups,"Stop":[{"hooks":[{"type":"prompt","prompt":"keep this"}]}]}});
             let raw = base.to_string();
-            let installed =
-                merge(Some(raw.as_bytes()), &[current.clone()], &current, true).unwrap();
-            let removed = merge(Some(&installed), &[current.clone()], &current, false).unwrap();
+            let installed = merge(
+                Some(raw.as_bytes()),
+                std::slice::from_ref(&current),
+                &current,
+                true,
+            )
+            .unwrap();
+            let removed = merge(
+                Some(&installed),
+                std::slice::from_ref(&current),
+                &current,
+                false,
+            )
+            .unwrap();
             assert_eq!(
                 serde_json::from_slice::<Value>(&removed).unwrap(),
                 base,
@@ -623,6 +640,12 @@ mod tests {
         let mut edited: Value = serde_json::from_str(&original).unwrap();
         edited["hooks"]["Stop"][0]["hooks"][0]["timeout"] = serde_json::json!(42);
         let raw = edited.to_string();
-        assert!(merge(Some(raw.as_bytes()), &[original.clone()], &original, false).is_err());
+        assert!(merge(
+            Some(raw.as_bytes()),
+            std::slice::from_ref(&original),
+            &original,
+            false
+        )
+        .is_err());
     }
 }
