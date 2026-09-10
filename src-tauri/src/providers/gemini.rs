@@ -19,6 +19,7 @@
 //
 // Poll interval clamped to >= 5 min (PLAN.md decision #12).
 use super::{ProviderError, QuotaSnapshot, QuotaWindow};
+use crate::credentials::ANTIGRAVITY_TARGET;
 use crate::fetch;
 use crate::oauth;
 use serde_json::Value;
@@ -34,17 +35,11 @@ const CLI_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
     expiry_unit: oauth::ExpiryUnit::Millis,
 };
 
-const ANTIGRAVITY_TARGET: &str = "gemini:antigravity";
 const LS_RPC: &str = "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary";
 
 /// gemini-cli credential file path, if present.
 fn cli_cred_path() -> Option<std::path::PathBuf> {
-    let p = crate::credentials::home()?.join(".gemini/oauth_creds.json");
-    if p.exists() {
-        Some(p)
-    } else {
-        None
-    }
+    crate::credentials::cli_cred_path("gemini")
 }
 
 fn antigravity_installed() -> bool {
@@ -107,7 +102,11 @@ fn discover_ls() -> Option<LsEndpoint> {
         };
         let ports = loopback_listen_ports(pid as u32);
         if ports.is_empty() {
-            return None;
+            // A zombie LS from a previous IDE session, or one that has not
+            // bound its listener yet. Keep looking, like every other rejection
+            // in this loop: returning here reported IdeNotRunning whenever WMI
+            // happened to enumerate the dead process first.
+            continue;
         }
         return Some(LsEndpoint { ports, csrf });
     }
@@ -138,6 +137,7 @@ fn loopback_listen_ports(pid: u32) -> Vec<u16> {
     };
     // Reasonable allocation ceiling: the listener table is tiny in practice.
     const MAX_TABLE_BYTES: u32 = 4 * 1024 * 1024;
+    const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
     let mut size = 0u32;
     unsafe {
         GetExtendedTcpTable(
@@ -149,32 +149,42 @@ fn loopback_listen_ports(pid: u32) -> Vec<u16> {
             0,
         );
     }
-    if size == 0 || size > MAX_TABLE_BYTES {
-        return vec![];
-    }
-    // u32-aligned storage: the table is a u32 length + u32 rows, and Vec<u32>
-    // guarantees the alignment GetExtendedTcpTable writes require.
-    let mut buf: Vec<u32> = vec![0; size.div_ceil(4) as usize];
-    let rc = unsafe {
-        GetExtendedTcpTable(
-            buf.as_mut_ptr().cast(),
-            &mut size,
-            0,
-            2, // AF_INET
-            TCP_TABLE_OWNER_PID_LISTENER,
-            0,
-        )
+    // The listener table can grow between sizing and reading; the read then
+    // fails with ERROR_INSUFFICIENT_BUFFER and an updated `size`. Giving up
+    // reported "Antigravity 未运行" because some other process happened to
+    // open a socket mid-call.
+    let mut attempt = 0;
+    let buf: Vec<u32> = loop {
+        if size == 0 || size > MAX_TABLE_BYTES {
+            return vec![];
+        }
+        // u32-aligned storage: the table is a u32 length + u32 rows, and
+        // Vec<u32> guarantees the alignment GetExtendedTcpTable requires.
+        let mut buf: Vec<u32> = vec![0; size.div_ceil(4) as usize];
+        let rc = unsafe {
+            GetExtendedTcpTable(
+                buf.as_mut_ptr().cast(),
+                &mut size,
+                0,
+                2, // AF_INET
+                TCP_TABLE_OWNER_PID_LISTENER,
+                0,
+            )
+        };
+        if rc == 0 {
+            break buf;
+        }
+        attempt += 1;
+        if rc != ERROR_INSUFFICIENT_BUFFER || attempt >= 3 {
+            return vec![];
+        }
     };
-    if rc != 0 {
-        return vec![];
-    }
     let table = buf.as_ptr().cast::<MIB_TCPTABLE_OWNER_PID>();
     let count = unsafe { (*table).dwNumEntries } as usize;
     // dwNumEntries is kernel-snapshot data; never trust it beyond the buffer
     // we actually provided (table = u32 count + N rows, repr(C)).
-    let row_u32s =
-        (std::mem::size_of::<MIB_TCPTABLE_OWNER_PID>() - std::mem::size_of::<u32>())
-            / std::mem::size_of::<u32>();
+    let row_u32s = (std::mem::size_of::<MIB_TCPTABLE_OWNER_PID>() - std::mem::size_of::<u32>())
+        / std::mem::size_of::<u32>();
     let max_rows = buf.len().saturating_sub(1) / row_u32s.max(1);
     let count = count.min(max_rows);
     // dwLocalAddr/dwLocalPort are stored in network byte order.
@@ -198,7 +208,7 @@ fn discover_ls() -> Option<LsEndpoint> {
         if !line.contains("language_server") || !line.contains("--override_ide_name antigravity") {
             continue;
         }
-        let pid: u32 = line.trim().split_whitespace().next()?.parse().ok()?;
+        let pid: u32 = line.split_whitespace().next()?.parse().ok()?;
         let csrf = line
             .split("--csrf_token ")
             .nth(1)?
@@ -317,9 +327,12 @@ pub fn parse_ls_quota(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
 // ---------------------------------------------------------------------------
 
 /// Google OAuth refresh with the public gemini-cli client credentials.
-async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
+async fn refresh_call(
+    refresh_token: String,
+) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
     const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-    const CLIENT_ID: &str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
+    const CLIENT_ID: &str =
+        "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
     const CLIENT_SECRET: &str = "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";
     let (status, body, _retry_after) = fetch::post_form(
         TOKEN_URL,
@@ -365,10 +378,7 @@ pub fn parse_load(body: &str) -> Result<(String, Option<String>), ProviderError>
     let v: Value = serde_json::from_str(body).map_err(|_| ProviderError::ParseFailed)?;
     let project = match v.get("cloudaicompanionProject") {
         Some(Value::String(s)) => Some(s.clone()),
-        Some(Value::Object(o)) => o
-            .get("id")
-            .and_then(|i| i.as_str())
-            .map(|s| s.to_string()),
+        Some(Value::Object(o)) => o.get("id").and_then(|i| i.as_str()).map(|s| s.to_string()),
         _ => None,
     };
     let plan = fetch::json_path(&v, "currentTier.id")
@@ -417,7 +427,11 @@ pub fn parse_quota(body: &str) -> Result<Vec<QuotaWindow>, ProviderError> {
     if windows.is_empty() {
         return Err(ProviderError::ParseFailed);
     }
-    windows.sort_by(|a, b| b.used_percent.partial_cmp(&a.used_percent).unwrap_or(std::cmp::Ordering::Equal));
+    windows.sort_by(|a, b| {
+        b.used_percent
+            .partial_cmp(&a.used_percent)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     if windows.len() > 2 {
         windows.truncate(1);
     }
@@ -439,7 +453,13 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
     // read needed — the LS holds the auth).
     if cli_cred_path().is_none() {
         return match fetch_via_ls().await {
-            Ok(windows) => Ok(QuotaSnapshot::ok(ID, NAME, Some("Antigravity".into()), windows, "official")),
+            Ok(windows) => Ok(QuotaSnapshot::ok(
+                ID,
+                NAME,
+                Some("Antigravity".into()),
+                windows,
+                "official",
+            )),
             Err(e) => {
                 if antigravity_installed() {
                     Err(ProviderError::IdeNotRunning)
@@ -541,7 +561,8 @@ mod tests {
 
     #[test]
     fn tolerates_string_fraction_and_missing_reset() {
-        let body = r#"{ "buckets": [ { "modelId": "gemini-2.5-pro", "remainingFraction": "0.5" } ] }"#;
+        let body =
+            r#"{ "buckets": [ { "modelId": "gemini-2.5-pro", "remainingFraction": "0.5" } ] }"#;
         let w = parse_quota(body).unwrap();
         assert_eq!(w.len(), 1);
         assert!((w[0].used_percent - 50.0).abs() < 0.01);
@@ -550,9 +571,18 @@ mod tests {
 
     #[test]
     fn malformed_is_parse_error() {
-        assert!(matches!(parse_quota("not json"), Err(ProviderError::ParseFailed)));
-        assert!(matches!(parse_quota(r#"{"foo": 1}"#), Err(ProviderError::ParseFailed)));
-        assert!(matches!(parse_load(r#"{"foo": 1}"#), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse_quota("not json"),
+            Err(ProviderError::ParseFailed)
+        ));
+        assert!(matches!(
+            parse_quota(r#"{"foo": 1}"#),
+            Err(ProviderError::ParseFailed)
+        ));
+        assert!(matches!(
+            parse_load(r#"{"foo": 1}"#),
+            Err(ProviderError::ParseFailed)
+        ));
     }
 
     // ---- Antigravity LS channel ----
@@ -560,10 +590,7 @@ mod tests {
     #[test]
     fn extracts_csrf_token_from_command_line() {
         let cmd = r#""C:\x\language_server.exe" --override_ide_name antigravity --csrf_token 3f2a-9B1c-44de --serve_https"#;
-        assert_eq!(
-            extract_csrf(cmd).as_deref(),
-            Some("3f2a-9B1c-44de")
-        );
+        assert_eq!(extract_csrf(cmd).as_deref(), Some("3f2a-9B1c-44de"));
         // token terminated by a non-hex char — same as the old CIM regex, a
         // quoted token does not match
         assert_eq!(extract_csrf(r#"exe --csrf_token "deadbeef" --x"#), None);
@@ -594,8 +621,15 @@ mod tests {
 
     #[test]
     fn ls_quota_without_gemini_group_is_parse_error() {
-        let body = r#"{"response":{"groups":[{"displayName":"Claude and GPT models","buckets":[]}]}}"#;
-        assert!(matches!(parse_ls_quota(body), Err(ProviderError::ParseFailed)));
-        assert!(matches!(parse_ls_quota("not json"), Err(ProviderError::ParseFailed)));
+        let body =
+            r#"{"response":{"groups":[{"displayName":"Claude and GPT models","buckets":[]}]}}"#;
+        assert!(matches!(
+            parse_ls_quota(body),
+            Err(ProviderError::ParseFailed)
+        ));
+        assert!(matches!(
+            parse_ls_quota("not json"),
+            Err(ProviderError::ParseFailed)
+        ));
     }
 }

@@ -1,9 +1,0 @@
-{
-  "kind": "plan-structure-and-source-integrity-only",
-  "passed": true,
-  "criteriaCount": 12,
-  "workflowCount": 5,
-  "sourceHashesVerified": 3,
-  "foldCoverageCorrectionVerified": true,
-  "productTests": "not_run"
-}

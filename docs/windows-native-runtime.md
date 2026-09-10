@@ -29,4 +29,4 @@ Windows Antigravity 探测使用原生 WMI/网络表接口；仅查询目标进�
 
 ## 签名与发布状态
 
-优先准备 SignPath 申请；MSIX 为待身份和兼容性验证的备选。详见 [Code signing policy](../code-signing-policy.md)。不修改稳定版附件，不在验证前发布新版。
+优先准备 SignPath 申请；MSIX 为待身份和兼容性验证的备选。详见 [Code signing policy](code-signing-policy.md)。不修改稳定版附件，不在验证前发布新版。

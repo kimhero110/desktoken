@@ -84,7 +84,7 @@ QuotaBar 就是为这个瞬间生的。它常驻桌面角落，把五家的 5 �
 
 - **默认版本已是 v0.3.3**：GitHub 的 Latest 指向 v0.3.3，v0.3.2 及原附件仍保留可取。发布标记不代表杀毒检测结论，当前 Windows 程序尚未签名。
 - **从 beta.2 升级需要重新生成钩子**：原来的 PowerShell 包装不会因替换 exe 自动消失。更新用户钩子后，在桌面端 Hooks 设置中重新审核信任；个人 QuotaBar 插件也需要重新生成，不能只更新用户钩子。两种接法选一种即可。
-- **自启动改用 Startup 快捷方式**：正常启动不再写 Run 注册表项；调整自启开关时才管理快捷方式并清理匹配当前程序的旧项。同名冲突会保留并报错，见[改造说明](docs/plans/windows-native-runtime.md)。
+- **自启动改用 Startup 快捷方式**：正常启动不再写 Run 注册表项；调整自启开关时才管理快捷方式并清理匹配当前程序的旧项。同名冲突会保留并报错，见[改造说明](docs/windows-native-runtime.md)。
 - **两个版本共用设置和数据**（`%APPDATA%\quotabar`）。切换时先从托盘退出旧版，再启动新版；单实例机制会拦住同时运行的第二个程序。
 - **任务验收范围**：本地事件桥和生命周期自动化测试通过；本轮用户确认了启动与 Defender 表现，迁移后的真实桌面任务完整状态流仍待验收。插件需从源码单独打包，见[插件接入说明](docs/codex-plugin.md)。
 - **旧包保留记录**：[v0.3.2](https://github.com/kimhero110/desktoken/releases/tag/v0.3.2) 稳定包继续保留可取；[beta.2](https://github.com/kimhero110/desktoken/releases/tag/v0.4.0-beta.2) 曾被 Defender 拦截，复核结论未确认，暂不建议运行。不要关闭防护或添加排除项绕过。

@@ -28,10 +28,7 @@ fn is_zh_locale() -> bool {
     lang_str_is_chinese(&std::env::var("LANG").unwrap_or_default())
         || lang_str_is_chinese(&std::env::var("LC_ALL").unwrap_or_default())
 }
-mod settings;
-mod task_monitor;
-mod task_integration;
-mod task_install;
+mod atomic_file;
 mod autostart;
 mod credentials;
 mod diagnostics;
@@ -40,6 +37,10 @@ mod history;
 mod oauth;
 mod poller;
 mod providers;
+mod settings;
+mod task_install;
+mod task_integration;
+mod task_monitor;
 mod updater_check;
 
 use settings::Settings;
@@ -99,7 +100,7 @@ fn apply_noactivate(_window: &WebviewWindow) {}
 fn apply_rounded_corners(window: &WebviewWindow) {
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     if let Ok(hwnd) = window.hwnd() {
         let raw: HWND = hwnd.0 as HWND;
@@ -134,7 +135,9 @@ fn clamp_position(window: &WebviewWindow, s: &Settings) -> tauri::Result<()> {
     let primary = window
         .primary_monitor()?
         .or_else(|| monitors.first().cloned());
-    let Some(primary) = primary else { return Ok(()) };
+    let Some(primary) = primary else {
+        return Ok(());
+    };
 
     let (mut x, mut y) = match (s.window_x, s.window_y) {
         (Some(x), Some(y)) => (x, y),
@@ -248,18 +251,73 @@ fn menu_ids() -> [&'static str; 8] {
 }
 
 fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let refresh = MenuItemBuilder::with_id(MENU_REFRESH, if is_zh_locale() { "立即刷新" } else { "Refresh Now" })
-        .enabled(!refresh_cooling_down())
+    let refresh = MenuItemBuilder::with_id(
+        MENU_REFRESH,
+        if is_zh_locale() {
+            "立即刷新"
+        } else {
+            "Refresh Now"
+        },
+    )
+    .enabled(!refresh_cooling_down())
+    .build(app)?;
+    let mini = CheckMenuItemBuilder::with_id(
+        MENU_MINI_MODE,
+        if is_zh_locale() {
+            "迷你模式"
+        } else {
+            "Mini Mode"
+        },
+    )
+    .checked(settings::load().mini_mode)
+    .build(app)?;
+    let diag = MenuItemBuilder::with_id(
+        MENU_DIAG,
+        if is_zh_locale() {
+            "复制诊断信息"
+        } else {
+            "Copy Diagnostics"
+        },
+    )
+    .build(app)?;
+    let check_update = MenuItemBuilder::with_id(
+        MENU_CHECK_UPDATE,
+        if is_zh_locale() {
+            "检查更新"
+        } else {
+            "Check for Updates"
+        },
+    )
+    .build(app)?;
+    let report = MenuItemBuilder::with_id(
+        MENU_REPORT,
+        if is_zh_locale() {
+            "在 GitHub 报告问题"
+        } else {
+            "Report Issue on GitHub"
+        },
+    )
+    .build(app)?;
+    let sponsor = MenuItemBuilder::with_id(
+        MENU_SPONSOR,
+        if is_zh_locale() {
+            "请作者喝杯咖啡"
+        } else {
+            "Buy Me a Coffee"
+        },
+    )
+    .build(app)?;
+    let settings_item = MenuItemBuilder::with_id(
+        MENU_SETTINGS,
+        if is_zh_locale() {
+            "设置..."
+        } else {
+            "Settings..."
+        },
+    )
+    .build(app)?;
+    let quit = MenuItemBuilder::with_id(MENU_QUIT, if is_zh_locale() { "退出" } else { "Quit" })
         .build(app)?;
-    let mini = CheckMenuItemBuilder::with_id(MENU_MINI_MODE, if is_zh_locale() { "迷你模式" } else { "Mini Mode" })
-        .checked(settings::load().mini_mode)
-        .build(app)?;
-    let diag = MenuItemBuilder::with_id(MENU_DIAG, if is_zh_locale() { "复制诊断信息" } else { "Copy Diagnostics" }).build(app)?;
-    let check_update = MenuItemBuilder::with_id(MENU_CHECK_UPDATE, if is_zh_locale() { "检查更新" } else { "Check for Updates" }).build(app)?;
-    let report = MenuItemBuilder::with_id(MENU_REPORT, if is_zh_locale() { "在 GitHub 报告问题" } else { "Report Issue on GitHub" }).build(app)?;
-    let sponsor = MenuItemBuilder::with_id(MENU_SPONSOR, if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" }).build(app)?;
-    let settings_item = MenuItemBuilder::with_id(MENU_SETTINGS, if is_zh_locale() { "设置..." } else { "Settings..." }).build(app)?;
-    let quit = MenuItemBuilder::with_id(MENU_QUIT, if is_zh_locale() { "退出" } else { "Quit" }).build(app)?;
     MenuBuilder::new(app)
         .items(&[
             &refresh,
@@ -302,7 +360,11 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
                 .notification()
                 .builder()
                 .title("QuotaBar")
-                .body(if ok { "诊断信息已复制（已脱敏）" } else { "复制失败" })
+                .body(if ok {
+                    "诊断信息已复制（已脱敏）"
+                } else {
+                    "复制失败"
+                })
                 .show();
         }
         MENU_CHECK_UPDATE => {
@@ -426,7 +488,7 @@ fn accept_tos(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") {
         reveal_main(&w);
     }
-    poller::start(app.clone());
+    poller::sync(app.clone());
     updater_check::maybe_check(app.clone(), false);
     let _ = app.emit_to("main", "tos-accepted", names);
     if let Some(t) = app.get_webview_window("tos") {
@@ -447,11 +509,15 @@ fn decline_tos(app: tauri::AppHandle) {
 /// autostart.rs). Startup itself never writes autostart; a legacy Run value
 /// from old versions keeps working until the user toggles.
 #[tauri::command]
-fn set_autostart(enabled: bool) -> Result<(), String> {
-    autostart::set_autostart(enabled)?;
-    let mut s = settings::load();
-    s.autostart = enabled;
-    settings::save(&s).map_err(|e| e.to_string())
+fn set_autostart(enabled: bool) -> Result<Option<String>, String> {
+    // Err means autostart::set_autostart changed nothing, so the stored flag
+    // must not move either. Ok may still carry a warning about a leftover we
+    // deliberately did not touch.
+    let warning = autostart::set_autostart(enabled)?;
+    // try_edit, not load/save: the poller edits settings concurrently, and a
+    // bare read-modify-write outside WRITE_LOCK drops the other side's change.
+    settings::try_edit(|s| s.autostart = enabled).map_err(|e| e.to_string())?;
+    Ok(warning)
 }
 
 #[tauri::command]
@@ -476,19 +542,36 @@ fn check_update_cmd(app: tauri::AppHandle) {
 #[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    // allowlist: our repo pages + official provider consoles (detail card links)
-    const ALLOWED: &[&str] = &[
-        "https://github.com/kimhero110/desktoken",
-        "https://platform.moonshot.cn",
-        "https://open.bigmodel.cn",
-        "https://chatgpt.com",
-        "https://claude.ai",
-        "https://antigravity.google",
-    ];
-    if !ALLOWED.iter().any(|p| url.starts_with(p)) {
+    if !url_is_allowed(&url) {
         return Err("不允许的链接".into());
     }
-    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Allowlist for open_url: our repo pages + the official provider consoles the
+/// detail card links to. Exact host plus a path prefix — a bare starts_with on
+/// the URL string let https://claude.ai.example.com/ through, and matching
+/// github.com by host alone would open any repository.
+fn url_is_allowed(url: &str) -> bool {
+    const ALLOWED: &[(&str, &str)] = &[
+        ("github.com", "/kimhero110/desktoken/"),
+        ("platform.moonshot.cn", "/"),
+        ("open.bigmodel.cn", "/"),
+        ("chatgpt.com", "/"),
+        ("claude.ai", "/"),
+        ("antigravity.google", "/"),
+    ];
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    parsed.scheme() == "https"
+        && parsed.host_str().is_some_and(|host| {
+            ALLOWED
+                .iter()
+                .any(|(h, prefix)| host == *h && parsed.path().starts_with(prefix))
+        })
 }
 
 /// E8: 7-day usage history for the detail card sparklines.
@@ -516,7 +599,9 @@ fn begin_drag(window: WebviewWindow) {
         if GetCursorPos(&mut pt) == 0 {
             return;
         }
-        let Ok(win_pos) = window.outer_position() else { return };
+        let Ok(win_pos) = window.outer_position() else {
+            return;
+        };
         let (cx0, cy0) = (pt.x, pt.y);
         let (wx0, wy0) = (win_pos.x, win_pos.y);
         loop {
@@ -576,11 +661,6 @@ fn set_mini_mode(window: &WebviewWindow, enable: bool) {
 
 /// Fit window height to frontend content (kills the invisible dead zone below
 /// the bar that still blocks clicks).
-#[tauri::command]
-fn jslog(msg: String) {
-    rustlog(format!("js: {}", msg));
-}
-
 pub(crate) fn rustlog(msg: String) {
     // redact defensively (eng review: no tokens in logs)
     let safe = diagnostics::redact(&msg);
@@ -709,11 +789,17 @@ fn apply_toolwindow(window: &WebviewWindow) {
             SetWindowPos(
                 raw,
                 std::ptr::null_mut(),
-                0, 0, 0, 0,
+                0,
+                0,
+                0,
+                0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
             );
             let confirm = GetWindowLongPtrW(raw, GWL_EXSTYLE);
-            rustlog(format!("sponsor toolwindow: before=0x{:X} confirm=0x{:X}", before, confirm));
+            rustlog(format!(
+                "sponsor toolwindow: before=0x{:X} confirm=0x{:X}",
+                before, confirm
+            ));
         }
     }
 }
@@ -774,7 +860,11 @@ fn open_sponsor_window(app: &tauri::AppHandle) {
     }
 
     let mut b = WebviewWindowBuilder::new(app, "sponsor", WebviewUrl::App("sponsor.html".into()))
-        .title(if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" })
+        .title(if is_zh_locale() {
+            "请作者喝杯咖啡"
+        } else {
+            "Buy Me a Coffee"
+        })
         .inner_size(logical_w, logical_h)
         .resizable(false)
         .maximizable(false)
@@ -805,7 +895,12 @@ fn open_sponsor_window(app: &tauri::AppHandle) {
             #[cfg(target_os = "macos")]
             {
                 use window_vibrancy::NSVisualEffectMaterial;
-                let _ = window_vibrancy::apply_vibrancy(&w, NSVisualEffectMaterial::HudWindow, None, None);
+                let _ = window_vibrancy::apply_vibrancy(
+                    &w,
+                    NSVisualEffectMaterial::HudWindow,
+                    None,
+                    None,
+                );
             }
             // 1s fallback: a stuck resource can never strand an invisible
             // always-on-top window
@@ -898,7 +993,11 @@ fn delete_manual_key(provider_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_provider_enabled(app: tauri::AppHandle, provider_id: String, enabled: bool) -> Result<(), String> {
+fn set_provider_enabled(
+    app: tauri::AppHandle,
+    provider_id: String,
+    enabled: bool,
+) -> Result<(), String> {
     settings::edit(|s| {
         if enabled && !s.enabled_providers.contains(&provider_id) {
             s.enabled_providers.push(provider_id.clone());
@@ -918,9 +1017,26 @@ fn list_custom_providers() -> Vec<settings::CustomProvider> {
 }
 
 #[tauri::command]
-fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider, key: Option<String>) -> Result<(), String> {
+fn save_custom_provider(
+    app: tauri::AppHandle,
+    mut def: settings::CustomProvider,
+    key: Option<String>,
+) -> Result<(), String> {
     if def.name.trim().is_empty() || def.endpoint.trim().is_empty() {
         return Err("名称与端点 URL 不能为空".into());
+    }
+    // The key travels to this endpoint on every poll, and the settings page
+    // gave no hint that http:// means plaintext. Loopback stays allowed so
+    // local and self-hosted monitors still work.
+    let endpoint = reqwest::Url::parse(def.endpoint.trim()).map_err(|_| "端点 URL 无效")?;
+    let loopback = matches!(
+        endpoint.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("[::1]")
+    );
+    if !(endpoint.scheme() == "https" || (endpoint.scheme() == "http" && loopback)) {
+        return Err(
+            "端点必须使用 https（本机 http://127.0.0.1 除外）：API key 会随请求发送".into(),
+        );
     }
     def.poll_minutes = def.poll_minutes.clamp(1, 1440);
     if let Some(k) = &key {
@@ -929,19 +1045,20 @@ fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider
             credentials::keyring_set(&format!("custom/{}", def.id), &k)?;
         }
     }
-    let mut s = settings::load();
-    s.custom_providers.retain(|p| p.id != def.id);
-    s.custom_providers.push(def);
-    settings::save(&s).map_err(|e| e.to_string())?;
+    // try_edit, not a load/save pair: the poller edits settings concurrently
+    // (toast dedup), and a read-modify-write outside WRITE_LOCK drops one side.
+    settings::try_edit(move |s| {
+        s.custom_providers.retain(|p| p.id != def.id);
+        s.custom_providers.push(def);
+    })
+    .map_err(|e| e.to_string())?;
     poller::sync(app); // hot reload
     Ok(())
 }
 
 #[tauri::command]
 fn delete_custom_provider(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let mut s = settings::load();
-    s.custom_providers.retain(|p| p.id != id);
-    settings::save(&s).map_err(|e| e.to_string())?;
+    settings::try_edit(|s| s.custom_providers.retain(|p| p.id != id)).map_err(|e| e.to_string())?;
     let _ = credentials::keyring_delete(&format!("custom/{}", id));
     poller::sync(app); // hot reload
     Ok(())
@@ -961,22 +1078,33 @@ async fn verify_provider(provider_id: String, custom_id: Option<String>) -> Resu
         let key = credentials::keyring_get(&format!("custom/{}", cid)).unwrap_or_default();
         return fetch::verify_custom(&def, &key).await;
     }
-    let (endpoint, header, prefix) = credentials::manual_key_target(&provider_id)
-        .ok_or("该平台不支持手动 key")?;
+    let (endpoint, header, prefix) =
+        credentials::manual_key_target(&provider_id).ok_or("该平台不支持手动 key")?;
     let key = credentials::keyring_get(&provider_id).ok_or("尚未保存 key")?;
     let (status, body, _) = fetch::get_with_auth(endpoint, header, prefix, &key).await?;
     match status {
         200..=299 => Ok(format!("验证成功（HTTP {}）", status)),
-        401 | 403 => Err(format!("HTTP {} — key 无效或已过期，去控制台重新生成", status)),
+        401 | 403 => Err(format!(
+            "HTTP {} — key 无效或已过期，去控制台重新生成",
+            status
+        )),
         429 => Err("HTTP 429 — 请求太频繁，30 秒后再试".into()),
-        _ => Err(format!("HTTP {} — {}", status, body.chars().take(120).collect::<String>())),
+        _ => Err(format!(
+            "HTTP {} — {}",
+            status,
+            body.chars().take(120).collect::<String>()
+        )),
     }
 }
 
 // ---------------------------------------------------------------------------
 fn main() {
-    if task_integration::handle_cli() { return; }
-    if task_monitor::handle_cli() { return; }
+    if task_integration::handle_cli() {
+        return;
+    }
+    if task_monitor::handle_cli() {
+        return;
+    }
     // AUMID: makes Windows toasts attributable to QuotaBar (E5/M5).
     #[cfg(target_os = "windows")]
     unsafe {
@@ -1020,7 +1148,6 @@ fn main() {
             get_settings,
             accept_tos,
             decline_tos,
-            jslog,
             begin_drag,
             autosize,
             apply_appearance,
@@ -1048,17 +1175,18 @@ fn main() {
             task_monitor::start(app.handle().clone());
             let s = settings::load();
 
-            let mut wb = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("QuotaBar")
-                .inner_size(s.width, WIN_H)
-                .resizable(false)
-                .maximizable(false)
-                .minimizable(false)
-                .decorations(false)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .focused(false)
-                .visible(false);
+            let mut wb =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("QuotaBar")
+                    .inner_size(s.width, WIN_H)
+                    .resizable(false)
+                    .maximizable(false)
+                    .minimizable(false)
+                    .decorations(false)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .focused(false)
+                    .visible(false);
             // transparent() is Windows/Linux-only in Tauri 2; on macOS
             // window-vibrancy sets up transparency itself.
             #[cfg(not(target_os = "macos"))]
@@ -1072,9 +1200,7 @@ fn main() {
             // Fallback per design tokens: if acrylic fails, raise opacity to 0.88.
             #[cfg(target_os = "windows")]
             if window_vibrancy::apply_acrylic(&window, Some((18, 18, 22, 184))).is_err() {
-                let mut s2 = s.clone();
-                s2.opacity = 0.88;
-                let _ = settings::save(&s2);
+                let _ = settings::try_edit(|s| s.opacity = 0.88);
             }
             #[cfg(target_os = "macos")]
             if window_vibrancy::apply_vibrancy(
@@ -1112,7 +1238,7 @@ fn main() {
             // is the only UI. Closing it without agreeing exits the app.
             if s.tos_accepted {
                 reveal_main(&window);
-                poller::start(app.handle().clone());
+                poller::sync(app.handle().clone());
                 // E1: version check only after consent (zero network before)
                 updater_check::maybe_check(app.handle().clone(), false);
             } else {
@@ -1187,6 +1313,33 @@ fn main() {
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+    /// Regression: the allowlist matched bare URL prefixes with starts_with,
+    /// so a lookalike host that merely began with an allowed origin passed.
+    #[test]
+    fn open_url_allowlist_matches_host_not_prefix() {
+        use super::url_is_allowed;
+        // the links the UI actually passes
+        assert!(url_is_allowed("https://claude.ai/settings/usage"));
+        assert!(url_is_allowed("https://platform.moonshot.cn/console"));
+        assert!(url_is_allowed("https://open.bigmodel.cn/"));
+        assert!(url_is_allowed("https://chatgpt.com/codex"));
+        assert!(url_is_allowed("https://antigravity.google"));
+        assert!(url_is_allowed(
+            "https://github.com/kimhero110/desktoken/releases/tag/v0.4.0"
+        ));
+        // lookalike hosts that the old prefix match accepted
+        assert!(!url_is_allowed("https://claude.ai.example.com/steal"));
+        assert!(!url_is_allowed("https://chatgpt.com.example.com/"));
+        assert!(!url_is_allowed(
+            "https://github.com/kimhero110/desktoken-evil/x"
+        ));
+        // other repositories, other schemes, junk
+        assert!(!url_is_allowed("https://github.com/someone/else"));
+        assert!(!url_is_allowed("http://claude.ai/settings/usage"));
+        assert!(!url_is_allowed("file:///etc/passwd"));
+        assert!(!url_is_allowed("not a url"));
+    }
+
     use super::*;
 
     /// T1: every id the menu builds must have a handler branch. A typo in a
@@ -1207,7 +1360,10 @@ mod tests {
             MENU_QUIT,
         ];
         for id in menu_ids() {
-            assert!(handled.contains(&id), "menu id '{id}' has no handler branch");
+            assert!(
+                handled.contains(&id),
+                "menu id '{id}' has no handler branch"
+            );
         }
     }
 
@@ -1225,7 +1381,10 @@ mod tests {
             .join("src")
             .join("sponsor.jpg");
         let bytes = std::fs::read(&path).unwrap_or_else(|e| {
-            panic!("sponsor.jpg 缺失或不可读（{}）：打包会裂图。文件应位于 src/sponsor.jpg", e)
+            panic!(
+                "sponsor.jpg 缺失或不可读（{}）：打包会裂图。文件应位于 src/sponsor.jpg",
+                e
+            )
         });
         let hash = format!("{:x}", sha2::Sha256::digest(&bytes));
         assert_eq!(

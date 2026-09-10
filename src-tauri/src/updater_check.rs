@@ -1,7 +1,7 @@
 // QuotaBar — E1 minimal version check (PLAN.md eng review #11).
-// ToS-gated (caller ensures consent), GitHub API + releases-page redirect
-// checked concurrently, first success wins; 5s hard timeout, silent failure;
-// result cached in settings for 24h. Skipped versions are not re-reported.
+// ToS-gated (caller ensures consent): GitHub API, then the releases-page
+// redirect as a fallback; 5s hard timeout, silent failure; result cached in
+// settings for 24h. Skipped versions are not re-reported.
 use crate::settings;
 
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
@@ -14,18 +14,31 @@ pub struct UpdateInfo {
     pub url: String,
 }
 
-/// semver-ish compare: true if `candidate` > `current` ("0.1.10" > "0.1.9").
+/// semver-ish compare: numeric parts first, then a final release supersedes
+/// any pre-release of the same number ("0.1.10" > "0.1.9"; "0.4.0" is newer
+/// than "0.4.0-beta.3"). Dropping the suffix outright made those two compare
+/// equal, so preview users were never told the stable release had landed.
 pub fn is_newer(candidate: &str, current: &str) -> bool {
-    fn parts(v: &str) -> Vec<u64> {
-        v.trim_start_matches('v')
-            .split('-') // skip pre-release suffixes
-            .next()
-            .unwrap_or("")
-            .split('.')
-            .map(|p| p.parse::<u64>().unwrap_or(0))
-            .collect()
+    fn split(v: &str) -> (Vec<u64>, &str) {
+        let v = v.trim().trim_start_matches('v');
+        let (nums, pre) = v.split_once('-').unwrap_or((v, ""));
+        (
+            nums.split('.')
+                .map(|p| p.parse::<u64>().unwrap_or(0))
+                .collect(),
+            pre,
+        )
     }
-    parts(candidate) > parts(current)
+    let (candidate_nums, candidate_pre) = split(candidate);
+    let (current_nums, current_pre) = split(current);
+    if candidate_nums != current_nums {
+        return candidate_nums > current_nums;
+    }
+    // Same numbers. We only ever surface final releases (the GitHub "latest"
+    // endpoint and fetch_via_api both exclude pre-releases), so the one case
+    // worth handling is stable superseding the pre-release of that version.
+    // Pre-release vs pre-release stays silent rather than guessing an ordering.
+    candidate_pre.is_empty() && !current_pre.is_empty()
 }
 
 async fn fetch_via_api() -> Option<UpdateInfo> {
@@ -43,7 +56,10 @@ async fn fetch_via_api() -> Option<UpdateInfo> {
     let v: serde_json::Value = serde_json::from_str(&body).ok()?;
     let tag = v.get("tag_name").and_then(|t| t.as_str())?;
     // skip pre-releases (PLAN: 跳预发布)
-    if v.get("prerelease").and_then(|p| p.as_bool()).unwrap_or(false) {
+    if v.get("prerelease")
+        .and_then(|p| p.as_bool())
+        .unwrap_or(false)
+    {
         return None;
     }
     Some(UpdateInfo {
@@ -80,11 +96,15 @@ async fn fetch_via_redirect() -> Option<UpdateInfo> {
     })
 }
 
-/// Concurrent double-check; first success wins. Silent None on total failure.
+/// API first, releases-page redirect as the fallback. Sequential on purpose:
+/// tokio::select! resolved to whichever future FINISHED first, and a
+/// rate-limited API returns None almost immediately, so the fallback was
+/// cancelled in exactly the situation it exists for. This runs at most once
+/// per 24h, so the extra round-trip on failure costs nothing.
 pub async fn check_now() -> Option<UpdateInfo> {
-    tokio::select! {
-        a = fetch_via_api() => a,
-        b = fetch_via_redirect() => b,
+    match fetch_via_api().await {
+        Some(info) => Some(info),
+        None => fetch_via_redirect().await,
     }
 }
 
@@ -101,7 +121,10 @@ pub fn maybe_check(app: tauri::AppHandle, force: bool) {
             .unwrap_or(false);
         let info: Option<UpdateInfo> = if fresh_cache && !force {
             s.latest_version.clone().map(|v| UpdateInfo {
-                url: format!("https://github.com/kimhero110/desktoken/releases/tag/v{}", v),
+                url: format!(
+                    "https://github.com/kimhero110/desktoken/releases/tag/v{}",
+                    v
+                ),
                 version: v,
             })
         } else {
@@ -146,5 +169,17 @@ mod tests {
         assert!(!is_newer("0.1.0", "0.1.0"));
         assert!(!is_newer("0.0.9", "0.1.0"));
         assert!(is_newer("1.0.0", "0.9.9"));
+    }
+
+    /// Regression: the pre-release suffix was stripped before comparing, so a
+    /// 0.4.0-beta.3 user was told the 0.4.0 stable release was the same version.
+    #[test]
+    fn stable_supersedes_the_prerelease_of_that_version() {
+        assert!(is_newer("0.4.0", "0.4.0-beta.3"));
+        assert!(!is_newer("0.4.0-beta.3", "0.4.0"));
+        assert!(!is_newer("0.4.0-beta.3", "0.4.0-beta.3"));
+        // numeric parts still dominate the suffix
+        assert!(is_newer("0.5.0", "0.4.0-beta.3"));
+        assert!(!is_newer("0.3.3", "0.4.0-beta.3"));
     }
 }

@@ -26,13 +26,7 @@ const CRED_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
 };
 
 fn cred_path() -> Result<std::path::PathBuf, ProviderError> {
-    let home = crate::credentials::home().ok_or(ProviderError::CredentialMissing)?;
-    let p = home.join(".codex/auth.json");
-    if p.exists() {
-        Ok(p)
-    } else {
-        Err(ProviderError::CredentialMissing)
-    }
+    crate::credentials::cli_cred_path("codex").ok_or(ProviderError::CredentialMissing)
 }
 
 /// Best-effort read of the account id for the chatgpt-account-id header.
@@ -45,7 +39,9 @@ fn account_id(path: &std::path::Path) -> Option<String> {
 }
 
 /// Codex CLI OAuth refresh (same client_id the official CLI uses).
-async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
+async fn refresh_call(
+    refresh_token: String,
+) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
     const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
     const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
     let (status, body, _retry_after) = fetch::post_form(
@@ -111,14 +107,11 @@ fn label_for(limit_window_seconds: Option<f64>) -> String {
 
 fn window_from(w: &serde_json::Value) -> Option<QuotaWindow> {
     let used = w.get("used_percent").and_then(fetch::as_f64)?;
-    let resets_at = w
-        .get("reset_at")
-        .and_then(super::parse_reset)
-        .or_else(|| {
-            w.get("reset_after_seconds")
-                .and_then(fetch::as_f64)
-                .map(|s| super::now_secs() + s as i64)
-        });
+    let resets_at = w.get("reset_at").and_then(super::parse_reset).or_else(|| {
+        w.get("reset_after_seconds")
+            .and_then(fetch::as_f64)
+            .map(|s| super::now_secs() + s as i64)
+    });
     Some(QuotaWindow {
         label: label_for(w.get("limit_window_seconds").and_then(fetch::as_f64)),
         used_percent: used,
@@ -149,16 +142,13 @@ pub fn parse(body: &str) -> Result<QuotaSnapshot, ProviderError> {
         _ => 4,
     };
     windows.sort_by_key(order);
-    let plan = v
-        .get("plan_type")
-        .and_then(|p| p.as_str())
-        .map(|p| {
-            let mut c = p.chars();
-            match c.next() {
-                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                None => p.to_string(),
-            }
-        });
+    let plan = v.get("plan_type").and_then(|p| p.as_str()).map(|p| {
+        let mut c = p.chars();
+        match c.next() {
+            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            None => p.to_string(),
+        }
+    });
     Ok(QuotaSnapshot::ok(ID, NAME, plan, windows, "official"))
 }
 
@@ -290,6 +280,9 @@ mod tests {
     #[test]
     fn malformed_response_is_parse_error() {
         assert!(matches!(parse("not json"), Err(ProviderError::ParseFailed)));
-        assert!(matches!(parse(r#"{"foo": 1}"#), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse(r#"{"foo": 1}"#),
+            Err(ProviderError::ParseFailed)
+        ));
     }
 }

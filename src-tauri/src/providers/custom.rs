@@ -17,7 +17,7 @@ pub async fn fetch_snapshot(def: &CustomProvider) -> Result<QuotaSnapshot, Provi
         429 => return Err(ProviderError::RateLimited { retry_after }),
         _ => return Err(ProviderError::Network),
     }
-    parse(&def, &body)
+    parse(def, &body)
 }
 
 pub fn parse(def: &CustomProvider, body: &str) -> Result<QuotaSnapshot, ProviderError> {
@@ -96,7 +96,10 @@ mod tests {
     #[test]
     fn missing_paths_is_parse_error() {
         let body = r#"{ "data": {} }"#;
-        assert!(matches!(parse(&def(), body), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse(&def(), body),
+            Err(ProviderError::ParseFailed)
+        ));
     }
 
     #[test]

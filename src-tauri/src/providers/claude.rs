@@ -24,13 +24,7 @@ const CRED_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
 };
 
 fn cred_path() -> Result<std::path::PathBuf, ProviderError> {
-    let home = crate::credentials::home().ok_or(ProviderError::CredentialMissing)?;
-    let p = home.join(".claude/.credentials.json");
-    if p.exists() {
-        Ok(p)
-    } else {
-        Err(ProviderError::CredentialMissing)
-    }
+    crate::credentials::cli_cred_path("claude").ok_or(ProviderError::CredentialMissing)
 }
 
 /// Plan tier from the credential file (usage endpoint does not return it).
@@ -46,7 +40,9 @@ fn plan_from_credentials(path: &std::path::Path) -> Option<String> {
 }
 
 /// Claude Code OAuth refresh (same client_id the official CLI uses).
-async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
+async fn refresh_call(
+    refresh_token: String,
+) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
     const TOKEN_URL: &str = "https://console.anthropic.com/v1/oauth/token";
     const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
     let (status, body, _retry_after) = fetch::post_form(
@@ -181,6 +177,9 @@ mod tests {
     #[test]
     fn malformed_response_is_parse_error() {
         assert!(matches!(parse("not json"), Err(ProviderError::ParseFailed)));
-        assert!(matches!(parse(r#"{"foo": 1}"#), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse(r#"{"foo": 1}"#),
+            Err(ProviderError::ParseFailed)
+        ));
     }
 }

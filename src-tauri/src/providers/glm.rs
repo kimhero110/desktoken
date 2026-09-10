@@ -23,13 +23,21 @@ pub fn parse(body: &str) -> Result<QuotaSnapshot, ProviderError> {
                 .and_then(|m| m.as_str())
                 .unwrap_or("")
                 .to_lowercase();
-            return Err(if code == 401.0 || code == 1001.0 || msg.contains("token") || msg.contains("auth") || msg.contains("apikey") || msg.contains("api key") {
-                ProviderError::AuthExpired
-            } else if code == 429.0 || msg.contains("rate") {
-                ProviderError::RateLimited { retry_after: None }
-            } else {
-                ProviderError::ParseFailed
-            });
+            return Err(
+                if code == 401.0
+                    || code == 1001.0
+                    || msg.contains("token")
+                    || msg.contains("auth")
+                    || msg.contains("apikey")
+                    || msg.contains("api key")
+                {
+                    ProviderError::AuthExpired
+                } else if code == 429.0 || msg.contains("rate") {
+                    ProviderError::RateLimited { retry_after: None }
+                } else {
+                    ProviderError::ParseFailed
+                },
+            );
         }
     }
     parse_value(&v)
@@ -125,17 +133,20 @@ async fn fetch_with_key_at(
         r
     };
     match status {
-        200..=299 => return try_parse(&body),
+        200..=299 => try_parse(&body),
         401 | 403 => {
-            let (status2, body2, retry_after2) = fetch::get_with_auth(endpoint_global, "Authorization", "", key)
-                .await
-                .map_err(|_| ProviderError::Network)?;
-            return match status2 {
+            let (status2, body2, retry_after2) =
+                fetch::get_with_auth(endpoint_global, "Authorization", "", key)
+                    .await
+                    .map_err(|_| ProviderError::Network)?;
+            match status2 {
                 200..=299 => try_parse(&body2),
                 401 | 403 => Err(ProviderError::AuthExpired),
-                429 => Err(ProviderError::RateLimited { retry_after: retry_after2 }),
+                429 => Err(ProviderError::RateLimited {
+                    retry_after: retry_after2,
+                }),
                 _ => Err(ProviderError::Network),
-            };
+            }
         }
         429 => Err(ProviderError::RateLimited { retry_after }),
         _ => Err(ProviderError::Network),
@@ -150,12 +161,10 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
 /// Multi-instance entry (方案 B): "glm" (manual key) or "glm#opencode".
 pub async fn fetch_instance(inst: &str) -> Result<QuotaSnapshot, ProviderError> {
     match inst {
-        "glm#opencode" => {
-            match credentials::opencode_cred("zhipuai-coding-plan") {
-                Some(credentials::OpencodeCred::ApiKey(k)) => fetch_with_key(&k).await,
-                _ => Err(ProviderError::CredentialMissing),
-            }
-        }
+        "glm#opencode" => match credentials::opencode_cred("zhipuai-coding-plan") {
+            Some(credentials::OpencodeCred::ApiKey(k)) => fetch_with_key(&k).await,
+            _ => Err(ProviderError::CredentialMissing),
+        },
         _ => fetch_snapshot().await,
     }
 }
@@ -230,7 +239,10 @@ mod tests {
         let body = r#"{ "code": 401, "msg": "无效的ApiKey" }"#;
         assert!(matches!(parse(body), Err(ProviderError::AuthExpired)));
         let body2 = r#"{ "code": 429, "msg": "rate limit" }"#;
-        assert!(matches!(parse(body2), Err(ProviderError::RateLimited { .. })));
+        assert!(matches!(
+            parse(body2),
+            Err(ProviderError::RateLimited { .. })
+        ));
     }
 
     #[test]
@@ -312,9 +324,7 @@ mod tests {
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .and(path("/cn"))
-                .respond_with(
-                    ResponseTemplate::new(429).append_header("retry-after", "60"),
-                )
+                .respond_with(ResponseTemplate::new(429).append_header("retry-after", "60"))
                 .mount(&server)
                 .await;
             let r = fetch_with_key_at("glm-key", &cn(&server), &global(&server)).await;
@@ -326,7 +336,8 @@ mod tests {
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .respond_with(
-                    ResponseTemplate::new(200).set_body_string(r#"{ "code": 401, "msg": "无效的ApiKey" }"#),
+                    ResponseTemplate::new(200)
+                        .set_body_string(r#"{ "code": 401, "msg": "无效的ApiKey" }"#),
                 )
                 .mount(&server)
                 .await;

@@ -17,7 +17,7 @@ pub fn redact(input: &str) -> String {
             }
         }
     }
-    if let Ok(s) = std::panic::catch_unwind(|| crate::settings::load()) {
+    if let Ok(s) = std::panic::catch_unwind(crate::settings::load) {
         for cp in s.custom_providers {
             if let Some(k) = credentials::keyring_get(&format!("custom/{}", cp.id)) {
                 if !k.is_empty() {
@@ -49,7 +49,9 @@ pub fn redact(input: &str) -> String {
     // 3) home dir → ~
     if let Some(h) = credentials::home() {
         let hs = h.to_string_lossy().to_string();
-        out = out.replace(&hs, "~").replace(&hs.replace('\\', "\\\\"), "~");
+        out = out
+            .replace(&hs, "~")
+            .replace(&hs.replace('\\', "\\\\"), "~");
     }
     out
 }
@@ -68,11 +70,20 @@ pub fn collect(provider_states: &[(String, String, Option<String>)]) -> String {
     out.push_str(&format!(
         "QuotaBar v{} | Windows | built profile: {}\n",
         env!("CARGO_PKG_VERSION"),
-        if cfg!(debug_assertions) { "debug" } else { "release" }
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
     ));
     out.push_str("--- providers ---\n");
     for (id, name, err) in provider_states {
-        out.push_str(&format!("{} ({}): {}\n", name, id, err.as_deref().unwrap_or("ok")));
+        out.push_str(&format!(
+            "{} ({}): {}\n",
+            name,
+            id,
+            err.as_deref().unwrap_or("ok")
+        ));
     }
     out.push_str("--- log tail (redacted) ---\n");
     let log = crate::settings::app_data_dir().join("spike.log");
