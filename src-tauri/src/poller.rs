@@ -111,7 +111,6 @@ fn evaluate_alerts(app: &AppHandle, prev: Option<QuotaSnapshot>, snap: &QuotaSna
     if snap.error.is_some() {
         return;
     }
-    let mut fired = false;
     let now = providers::now_secs();
 
     settings::edit(|s| {
@@ -119,8 +118,8 @@ fn evaluate_alerts(app: &AppHandle, prev: Option<QuotaSnapshot>, snap: &QuotaSna
             let key = format!("{}/{}", snap.provider_id, w.label);
 
             // hysteresis re-arm: usage fell below 85%
-            if w.used_percent < 85.0 && s.toast_alerted.remove(&key).is_some() {
-                fired = true;
+            if w.used_percent < 85.0 {
+                s.toast_alerted.remove(&key);
             }
             // >=90% crossing: one toast per reset cycle
             if w.used_percent >= 90.0 {
@@ -137,7 +136,6 @@ fn evaluate_alerts(app: &AppHandle, prev: Option<QuotaSnapshot>, snap: &QuotaSna
                         ),
                     );
                     s.toast_alerted.insert(key, cycle);
-                    fired = true;
                 }
             }
             // reset moment: previous cycle's resets_at passed, new cycle began
@@ -152,7 +150,6 @@ fn evaluate_alerts(app: &AppHandle, prev: Option<QuotaSnapshot>, snap: &QuotaSna
             }
         }
     });
-    let _ = fired;
 }
 
 fn spawn_provider<F, Fut>(
@@ -330,12 +327,6 @@ pub fn sync(app: AppHandle) {
 
     let _ = app.emit("providers-init", live);
     refresh_now(); // existing tasks re-read settings; 429 cooldowns stay intact
-}
-
-/// Start polling (ToS gate: caller ensures consent). Kept as the historical
-/// entry point; now equivalent to sync().
-pub fn start(app: AppHandle) {
-    sync(app);
 }
 
 #[cfg(test)]

@@ -24,13 +24,7 @@ const CRED_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
 };
 
 fn cred_path() -> Result<std::path::PathBuf, ProviderError> {
-    let home = crate::credentials::home().ok_or(ProviderError::CredentialMissing)?;
-    let p = home.join(".claude/.credentials.json");
-    if p.exists() {
-        Ok(p)
-    } else {
-        Err(ProviderError::CredentialMissing)
-    }
+    crate::credentials::cli_cred_path("claude").ok_or(ProviderError::CredentialMissing)
 }
 
 /// Plan tier from the credential file (usage endpoint does not return it).

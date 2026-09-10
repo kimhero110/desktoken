@@ -29,17 +29,10 @@ pub async fn resolve_token() -> Result<(String, &'static str), ProviderError> {
     if let Some(k) = credentials::keyring_get(ID) {
         return Ok((k, "manual_key"));
     }
-    let home = std::env::var("USERPROFILE").map_err(|_| ProviderError::CredentialMissing)?;
-    for rel in [
-        ".kimi-code/credentials/kimi-code.json",
-        ".kimi/credentials/kimi-code.json",
-    ] {
-        let p = std::path::Path::new(&home).join(rel);
-        if p.exists() {
-            return oauth::resolve_oauth_token(&p, &CRED_SPEC, refresh_call).await;
-        }
-    }
-    Err(ProviderError::CredentialMissing)
+    // credentials::cli_cred_path, not USERPROFILE: that env var is unset on
+    // macOS, so the CLI credential was never found there.
+    let p = credentials::cli_cred_path(ID).ok_or(ProviderError::CredentialMissing)?;
+    oauth::resolve_oauth_token(&p, &CRED_SPEC, refresh_call).await
 }
 
 /// Kimi OAuth device-flow token endpoint.

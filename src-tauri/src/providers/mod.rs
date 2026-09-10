@@ -125,7 +125,7 @@ pub async fn fetch_instance(
         snap.provider_name = name.to_string();
         return Ok(snap);
     }
-    let (base, _suffix) = id.split_once('#').unwrap_or((id, ""));
+    let base = id.split_once('#').map_or(id, |(base, _)| base);
     let mut snap = match base {
         "kimi" => kimi::fetch_instance(id).await?,
         "glm" => glm::fetch_instance(id).await?,

@@ -427,7 +427,7 @@ fn accept_tos(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") {
         reveal_main(&w);
     }
-    poller::start(app.clone());
+    poller::sync(app.clone());
     updater_check::maybe_check(app.clone(), false);
     let _ = app.emit_to("main", "tos-accepted", names);
     if let Some(t) = app.get_webview_window("tos") {
@@ -596,11 +596,6 @@ fn set_mini_mode(window: &WebviewWindow, enable: bool) {
 
 /// Fit window height to frontend content (kills the invisible dead zone below
 /// the bar that still blocks clicks).
-#[tauri::command]
-fn jslog(msg: String) {
-    rustlog(format!("js: {}", msg));
-}
-
 pub(crate) fn rustlog(msg: String) {
     // redact defensively (eng review: no tokens in logs)
     let safe = diagnostics::redact(&msg);
@@ -1053,7 +1048,6 @@ fn main() {
             get_settings,
             accept_tos,
             decline_tos,
-            jslog,
             begin_drag,
             autosize,
             apply_appearance,
@@ -1143,7 +1137,7 @@ fn main() {
             // is the only UI. Closing it without agreeing exits the app.
             if s.tos_accepted {
                 reveal_main(&window);
-                poller::start(app.handle().clone());
+                poller::sync(app.handle().clone());
                 // E1: version check only after consent (zero network before)
                 updater_check::maybe_check(app.handle().clone(), false);
             } else {

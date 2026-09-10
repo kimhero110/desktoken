@@ -116,31 +116,57 @@ pub fn normalize_key(raw: &str) -> String {
     t.strip_prefix("Bearer ").unwrap_or(t).trim().to_string()
 }
 
-/// Built-in providers with CLI credential auto-discovery.
-/// (id, display name, supports manual key, candidate credential file paths)
-fn builtin_specs() -> Vec<(&'static str, &'static str, bool, Vec<&'static str>)> {
-    vec![
-        ("claude", "Claude", true, vec![".claude/.credentials.json"]),
-        ("codex", "Codex", false, vec![".codex/auth.json"]),
-        ("gemini", "Gemini", false, vec![".gemini/oauth_creds.json"]),
-        (
-            "kimi",
-            "Kimi",
-            true,
-            vec![
-                ".kimi-code/credentials/kimi-code.json",
-                ".kimi/credentials/kimi-code.json",
-            ],
-        ),
-        ("glm", "GLM 智谱", true, vec![]),
-    ]
+/// Built-in providers with CLI credential auto-discovery. This table is the
+/// ONE place a credential path is written: detect(), discover_instances() and
+/// each provider module used to repeat them, so adding a platform meant three
+/// edits and the copies drifted.
+/// (id, display name, supports manual key, candidate paths under $HOME)
+const BUILTINS: &[(&str, &str, bool, &[&str])] = &[
+    ("claude", "Claude", true, &[".claude/.credentials.json"]),
+    ("codex", "Codex", false, &[".codex/auth.json"]),
+    ("gemini", "Gemini", false, &[".gemini/oauth_creds.json"]),
+    (
+        "kimi",
+        "Kimi",
+        true,
+        &[
+            ".kimi-code/credentials/kimi-code.json",
+            ".kimi/credentials/kimi-code.json",
+        ],
+    ),
+    ("glm", "GLM 智谱", true, &[]),
+];
+
+/// First existing CLI credential file for a built-in provider.
+pub fn cli_cred_path(id: &str) -> Option<std::path::PathBuf> {
+    let home = home()?;
+    BUILTINS
+        .iter()
+        .find(|(builtin, ..)| *builtin == id)?
+        .3
+        .iter()
+        .map(|rel| home.join(rel))
+        .find(|p| p.exists())
+}
+
+/// Antigravity IDE stores the same Google OAuth credential the gemini CLI
+/// would, under this Windows Credential Manager target.
+pub const ANTIGRAVITY_TARGET: &str = "gemini:antigravity";
+
+/// Is this provider's credential reachable outside its own CLI file?
+fn foreign_source(id: &str) -> Option<&'static str> {
+    (id == "gemini" && read_foreign_cred(ANTIGRAVITY_TARGET).is_some())
+        .then_some("Antigravity IDE（凭据管理器）")
+}
+
+fn instance(id: &str, name: &str) -> InstanceDesc {
+    InstanceDesc { id: id.into(), name: name.into(), base: id.into() }
 }
 
 pub fn detect() -> Vec<ProviderCredInfo> {
-    let h = home();
-    builtin_specs()
-        .into_iter()
-        .map(|(id, name, supports_key, paths)| {
+    BUILTINS
+        .iter()
+        .map(|&(id, name, supports_key, _)| {
             // manual key takes precedence display-wise
             if supports_key && keyring_get(id).is_some() {
                 return ProviderCredInfo {
@@ -151,24 +177,9 @@ pub fn detect() -> Vec<ProviderCredInfo> {
                     supports_manual_key: supports_key,
                 };
             }
-            let found = paths.iter().find_map(|p| {
-                h.as_ref().map(|hh| hh.join(p)).and_then(|full| {
-                    if full.exists() {
-                        Some(full.display().to_string())
-                    } else {
-                        None
-                    }
-                })
-            });
-            // Gemini fallback: Antigravity IDE stores the same Google OAuth
-            // credential in Windows Credential Manager ("gemini:antigravity").
-            let found = found.or_else(|| {
-                if id == "gemini" && read_foreign_cred("gemini:antigravity").is_some() {
-                    Some("Antigravity IDE（凭据管理器）".to_string())
-                } else {
-                    None
-                }
-            });
+            let found = cli_cred_path(id)
+                .map(|p| p.display().to_string())
+                .or_else(|| foreign_source(id).map(String::from));
             match found {
                 Some(p) => ProviderCredInfo {
                     id: id.into(),
@@ -275,8 +286,7 @@ pub fn parse_opencode_auth(raw: &str) -> Vec<(String, OpencodeCred)> {
 
 /// Best-effort read of the Codex CLI's account id (dedup vs opencode's).
 fn codex_cli_account_id() -> Option<String> {
-    let p = home()?.join(".codex/auth.json");
-    let raw = std::fs::read_to_string(p).ok()?;
+    let raw = std::fs::read_to_string(cli_cred_path("codex")?).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     crate::fetch::json_path(&v, "tokens.account_id")
         .and_then(|x| x.as_str())
@@ -286,29 +296,21 @@ fn codex_cli_account_id() -> Option<String> {
 /// Discover every runnable provider instance on this machine.
 /// Order: primary (CLI/manual) first, opencode accounts after.
 pub fn discover_instances() -> Vec<InstanceDesc> {
-    let h = home();
     let mut out: Vec<InstanceDesc> = vec![];
-
-    let cli = |rel: &str| h.as_ref().map(|hh| hh.join(rel)).filter(|p| p.exists());
-    if cli(".codex/auth.json").is_some() {
-        out.push(InstanceDesc { id: "codex".into(), name: "Codex".into(), base: "codex".into() });
+    if cli_cred_path("codex").is_some() {
+        out.push(instance("codex", "Codex"));
     }
-    if cli(".claude/.credentials.json").is_some() {
-        out.push(InstanceDesc { id: "claude".into(), name: "Claude".into(), base: "claude".into() });
+    if cli_cred_path("claude").is_some() {
+        out.push(instance("claude", "Claude"));
     }
-    if cli(".gemini/oauth_creds.json").is_some() {
-        out.push(InstanceDesc { id: "gemini".into(), name: "Gemini".into(), base: "gemini".into() });
-    } else if read_foreign_cred("gemini:antigravity").is_some() {
-        out.push(InstanceDesc { id: "gemini".into(), name: "Gemini".into(), base: "gemini".into() });
+    if cli_cred_path("gemini").is_some() || foreign_source("gemini").is_some() {
+        out.push(instance("gemini", "Gemini"));
     }
-    if cli(".kimi-code/credentials/kimi-code.json").is_some()
-        || cli(".kimi/credentials/kimi-code.json").is_some()
-        || keyring_get("kimi").is_some()
-    {
-        out.push(InstanceDesc { id: "kimi".into(), name: "Kimi".into(), base: "kimi".into() });
+    if cli_cred_path("kimi").is_some() || keyring_get("kimi").is_some() {
+        out.push(instance("kimi", "Kimi"));
     }
     if keyring_get("glm").is_some() {
-        out.push(InstanceDesc { id: "glm".into(), name: "GLM".into(), base: "glm".into() });
+        out.push(instance("glm", "GLM"));
     }
 
     // opencode accounts (dedup against the primary credential of the platform)

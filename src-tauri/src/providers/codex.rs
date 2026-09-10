@@ -26,13 +26,7 @@ const CRED_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
 };
 
 fn cred_path() -> Result<std::path::PathBuf, ProviderError> {
-    let home = crate::credentials::home().ok_or(ProviderError::CredentialMissing)?;
-    let p = home.join(".codex/auth.json");
-    if p.exists() {
-        Ok(p)
-    } else {
-        Err(ProviderError::CredentialMissing)
-    }
+    crate::credentials::cli_cred_path("codex").ok_or(ProviderError::CredentialMissing)
 }
 
 /// Best-effort read of the account id for the chatgpt-account-id header.

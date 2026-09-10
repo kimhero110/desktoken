@@ -19,6 +19,7 @@
 //
 // Poll interval clamped to >= 5 min (PLAN.md decision #12).
 use super::{ProviderError, QuotaSnapshot, QuotaWindow};
+use crate::credentials::ANTIGRAVITY_TARGET;
 use crate::fetch;
 use crate::oauth;
 use serde_json::Value;
@@ -34,17 +35,11 @@ const CLI_SPEC: oauth::OAuthFileSpec = oauth::OAuthFileSpec {
     expiry_unit: oauth::ExpiryUnit::Millis,
 };
 
-const ANTIGRAVITY_TARGET: &str = "gemini:antigravity";
 const LS_RPC: &str = "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary";
 
 /// gemini-cli credential file path, if present.
 fn cli_cred_path() -> Option<std::path::PathBuf> {
-    let p = crate::credentials::home()?.join(".gemini/oauth_creds.json");
-    if p.exists() {
-        Some(p)
-    } else {
-        None
-    }
+    crate::credentials::cli_cred_path("gemini")
 }
 
 fn antigravity_installed() -> bool {
