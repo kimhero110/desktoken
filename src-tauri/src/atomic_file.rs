@@ -103,7 +103,5 @@ fn rename_with_retry(
             }
         }
     }
-    Err(last.unwrap_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "rename not attempted")
-    }))
+    Err(last.unwrap_or_else(|| std::io::Error::other("rename not attempted")))
 }

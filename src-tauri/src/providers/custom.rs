@@ -17,7 +17,7 @@ pub async fn fetch_snapshot(def: &CustomProvider) -> Result<QuotaSnapshot, Provi
         429 => return Err(ProviderError::RateLimited { retry_after }),
         _ => return Err(ProviderError::Network),
     }
-    parse(&def, &body)
+    parse(def, &body)
 }
 
 pub fn parse(def: &CustomProvider, body: &str) -> Result<QuotaSnapshot, ProviderError> {

@@ -209,7 +209,7 @@ fn discover_ls() -> Option<LsEndpoint> {
         if !line.contains("language_server") || !line.contains("--override_ide_name antigravity") {
             continue;
         }
-        let pid: u32 = line.trim().split_whitespace().next()?.parse().ok()?;
+        let pid: u32 = line.split_whitespace().next()?.parse().ok()?;
         let csrf = line
             .split("--csrf_token ")
             .nth(1)?

@@ -17,7 +17,7 @@ pub fn redact(input: &str) -> String {
             }
         }
     }
-    if let Ok(s) = std::panic::catch_unwind(|| crate::settings::load()) {
+    if let Ok(s) = std::panic::catch_unwind(crate::settings::load) {
         for cp in s.custom_providers {
             if let Some(k) = credentials::keyring_get(&format!("custom/{}", cp.id)) {
                 if !k.is_empty() {

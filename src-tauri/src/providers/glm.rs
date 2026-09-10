@@ -125,17 +125,17 @@ async fn fetch_with_key_at(
         r
     };
     match status {
-        200..=299 => return try_parse(&body),
+        200..=299 => try_parse(&body),
         401 | 403 => {
             let (status2, body2, retry_after2) = fetch::get_with_auth(endpoint_global, "Authorization", "", key)
                 .await
                 .map_err(|_| ProviderError::Network)?;
-            return match status2 {
+            match status2 {
                 200..=299 => try_parse(&body2),
                 401 | 403 => Err(ProviderError::AuthExpired),
                 429 => Err(ProviderError::RateLimited { retry_after: retry_after2 }),
                 _ => Err(ProviderError::Network),
-            };
+            }
         }
         429 => Err(ProviderError::RateLimited { retry_after }),
         _ => Err(ProviderError::Network),

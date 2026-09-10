@@ -70,9 +70,8 @@ fn read_doc(path: &Path) -> Result<(String, Value), ProviderError> {
         match std::fs::read_to_string(path) {
             Ok(raw) => {
                 last_read_failed = false;
-                match serde_json::from_str::<Value>(&raw) {
-                    Ok(v) => return Ok((raw, v)),
-                    Err(_) => {}
+                if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+                    return Ok((raw, v));
                 }
             }
             Err(_) => last_read_failed = true,

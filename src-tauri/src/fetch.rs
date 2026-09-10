@@ -155,7 +155,7 @@ async fn read_capped_body(resp: reqwest::Response, max_bytes: usize) -> Result<S
     use tokio::io::AsyncReadExt;
     let mut stream = tokio_util::io::StreamReader::new(
         resp.bytes_stream()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+            .map_err(std::io::Error::other),
     );
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
