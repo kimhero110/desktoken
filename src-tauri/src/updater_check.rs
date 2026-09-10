@@ -23,7 +23,9 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
         let v = v.trim().trim_start_matches('v');
         let (nums, pre) = v.split_once('-').unwrap_or((v, ""));
         (
-            nums.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect(),
+            nums.split('.')
+                .map(|p| p.parse::<u64>().unwrap_or(0))
+                .collect(),
             pre,
         )
     }
