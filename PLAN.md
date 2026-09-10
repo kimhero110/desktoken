@@ -1,8 +1,8 @@
 # PLAN（现状版）
 
-## 当前规划重点（2026-09-08）
+## 当前规划重点
 
-ChatGPT 桌面端与精简菜单总体方案已完成P/R。[WP-003隔离交互原型](docs/plans/chatgpt-desktop/WP-003/PLAN-v3.md)已由 OpenCode + GLM-5.3 编码并完成两轮返修，10项静态/纯逻辑检查通过，独立源码复核发现的4项P2已修复并关闭；浏览器验收受工具安全策略阻塞，整体C未通过，用户走查pending。最新证据见[实施与QA记录](docs/plans/chatgpt-desktop/WP-003/GLM-QA.md)，GATE.md保留实施前历史决定。依赖调整只允许合成原型先行；WP-002真实只读信号仍缺证据，回P并继续阻塞WP-004正式监控，不能将原型检查或CLI支持推定为桌面接入。
+ChatGPT 桌面端仍未接通：本机身份可以核实，但外部只读订阅信号和真实四态都还缺实测证据，正式监控不启动。交互原型只是合成数据的草稿，不能拿它的检查结果推定桌面接入可用。
 
 > 本文件是**活文档**，描述 QuotaBar 当前的实际形态与近期方向。
 > 2026-09-01 的四轮评审原始计划已归档至 [docs/PLAN-history.md](docs/PLAN-history.md)——
@@ -26,7 +26,8 @@ src-tauri/src/
 ├── oauth.rs          # 六步刷新并发协议（单飞/compare-before-write/rename 重试）
 ├── credentials.rs    # 凭据发现：CLI 文件 + opencode auth.json + keyring + 外域只读
 ├── history.rs        # E8 用量历史（SQLite，7 天）
-├── settings.rs       # 原子写 + 全局写锁 + edit() 原子读改写
+├── settings.rs       # 全局写锁 + edit()/try_edit() 原子读改写
+├── atomic_file.rs    # 保留目标权限/DACL 的原子替换（凭据、设置、接入配置共用）
 ├── diagnostics.rs    # 统一脱敏层 + 复制诊断
 ├── updater_check.rs  # E1 版本检查（24h 缓存/双通道）
 └── providers/        # 每平台一个文件 + mod.rs 的 fetch_instance 统一分发
@@ -65,5 +66,3 @@ src-tauri/src/
 - [ ] 手动多把命名 key（kimi/二号）
 
 发布边界（2026-09-07）：ChatGPT 桌面端未接入，Codex 桌面端未验证。Codex CLI hook 配置与桌面端监控不能混为一谈。v0.4.0-beta.1 为预览版，v0.3.2 保持稳定版。
-
-WP-003原型现状（2026-09-08）：视觉R4与U5可用性R5返修完成，源码/语法检查通过，用户对视觉方向基本认可；浏览器及五流程实际验收pending，正式ChatGPT监控未接通。原型六文件已复制入仓库[prototypes/chatgpt-desktop](prototypes/chatgpt-desktop/README.md)（草稿，现行权威版本；隔离路径文档为历史记录），最新QA证据见[USABILITY-R5](docs/plans/chatgpt-desktop/WP-003/USABILITY-R5.md)及usability-r5-results.json。

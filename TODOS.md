@@ -1,16 +1,8 @@
-# TODOS — DeskToken 延期项（/autoplan 收集）
-
-## ChatGPT 桌面端细节规划（2026-09-08）
-
-- [x] WP-001：细节方案、菜单迁移、12项预声明验收、L2隔离独立评审；R1退回、v2修订、R2复审及仲裁通过。
-- [ ] WP-002：首轮只读调查完成，工作包当前回P；本机ChatGPT身份已核实，外部只读订阅及真实四态仍待验证，继续阻塞WP-004。见[调查记录](docs/plans/chatgpt-desktop/WP-002/FINDINGS.md)。
-- [x] WP-003 P/R：隔离原型细节及依赖调整经独立评审和修订复核通过，[历史开工决定](docs/plans/chatgpt-desktop/WP-003/GATE.md)，后续已获用户授权实施。
-- [ ] WP-003 Do/Check：GLM已产出六文件，独立源码复核4项P2已修复关闭；上一版本10项静态/纯逻辑检查通过。浏览器策略阻塞实际UI验收，整体未通过；原型已作为待验收草稿接回仓库。见[QA及恢复条件](docs/plans/chatgpt-desktop/WP-003/GLM-QA.md)。用户走查pending。
-- [ ] WP-004：完整状态提醒与返回应用实现；WP-002核心能力通过并另走P/R后才启动。
-
-方案及原始评审证据见 [规划入口](docs/plans/chatgpt-desktop/README.md)。本轮未改应用代码、用户配置或发布版本。
+# TODOS — QuotaBar 延期项
 
 ## 本机任务状态（开发版）
+
+- [ ] ChatGPT 桌面端接入：本机身份可核实，外部只读订阅信号与真实四态仍缺实测证据，未接通。
 
 - [x] 严格审查复现并修复 9 项缺陷，保留失败→通过的回归证据（见 docs/review-task-monitor-2026-09-06.md）。
 - [ ] 上游轮次/事件序号乱序防护。
@@ -48,7 +40,7 @@
 - [ ] 系统唤醒后的专用错峰刷新
 - [ ] 跨进程凭据写入竞争：compare-before-write 并非原子 CAS；进程退出会丢失待写回内存状态
 - [ ] macOS `is_zh_locale` 对 Finder 启动的 GUI 应用不可靠（无 LANG/LC_ALL → 中文用户见英文菜单）：改走 NSLocale/CFLocale（2026-09-06 autoplan eng 评审发现，预存 bug）
-- [ ] OAuth 写回后 re-apply 原文件显式 ACL（当前各家 CLI 未设显式 ACL，无害；协议文档已标注）
+- [x] OAuth 写回保留原文件权限/ACL（改走 atomic_file::replace，创建时即套用原文件安全描述符）
 - [ ] 版本检查自定义源：ghproxy 镜像或自建 CDN manifest（国内可达性）
 - [ ] 完整签名 auto-updater（tauri-plugin-updater + 证书；定位升级为对外分发产品时再做）
 
@@ -59,5 +51,3 @@
 - 凭据跨工具双向同步
 
 发布边界（2026-09-07）：ChatGPT 桌面端未接入，Codex 桌面端未验证。Codex CLI hook 配置与桌面端监控不能混为一谈。v0.4.0-beta.1 为预览版，v0.3.2 保持稳定版。
-
-WP-003原型现状（2026-09-08）：视觉R4与U5可用性R5返修完成，源码/语法检查通过，用户对视觉方向基本认可；浏览器及五流程实际验收pending，正式ChatGPT监控未接通。原型六文件已复制入仓库[prototypes/chatgpt-desktop](prototypes/chatgpt-desktop/README.md)（草稿，现行权威版本；隔离路径文档为历史记录），最新QA证据见[USABILITY-R5](docs/plans/chatgpt-desktop/WP-003/USABILITY-R5.md)及usability-r5-results.json。

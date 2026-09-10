@@ -1,9 +1,0 @@
-{
-  "kind": "plan-documents-only",
-  "passed": true,
-  "finalPacket": "packet-v3.json",
-  "foldCoverageAndReferencesVerified": true,
-  "sourceHashesVerified": 3,
-  "prototypeDirectoryExists": false,
-  "productTests": "not_run"
-}

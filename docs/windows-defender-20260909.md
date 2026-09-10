@@ -70,7 +70,7 @@ GitHub 与 Gitee beta.2 发布页已同步提示 Windows 检测待核查，暂�
 
 按维护者要求，当前源码将 Antigravity 探测改为 Rust 调用 WMI 与 IP Helper TCP 表，将生成的 Codex 钩子改为原生接收器命令、Claude 钩子改为参数数组直启；ACL 测试也改用原生安全 API。正常启动不再写入自启动配置；用户设置动作改为管理 Startup 快捷方式，并清理匹配当前程序的旧 Run 值。冲突项保留并报告错误。
 
-已有旧 Run 项不会在普通启动时偷偷迁移，升级后需切换一次设置。旧 PowerShell 钩子也不会自动改变，需重新生成并完成客户端信任确认。维护用 `.ps1` 取证/发布脚本不由应用启动，此次没有把这些独立工具迁入主程序。具体方案见 [Windows 原生运行链](plans/windows-native-runtime.md)。
+已有旧 Run 项不会在普通启动时偷偷迁移，升级后需切换一次设置。旧 PowerShell 钩子也不会自动改变，需重新生成并完成客户端信任确认。维护用 `.ps1` 取证/发布脚本不由应用启动，此次没有把这些独立工具迁入主程序。具体方案见 [Windows 原生运行链](windows-native-runtime.md)。
 
 上述源码改造不修改 beta.2 的既有哈希，不替代 WDSI 对旧样本的判定。签名申请状态单独记录在 [Code signing policy](code-signing-policy.md)。
 
