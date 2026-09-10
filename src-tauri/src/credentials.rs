@@ -160,7 +160,11 @@ fn foreign_source(id: &str) -> Option<&'static str> {
 }
 
 fn instance(id: &str, name: &str) -> InstanceDesc {
-    InstanceDesc { id: id.into(), name: name.into(), base: id.into() }
+    InstanceDesc {
+        id: id.into(),
+        name: name.into(),
+        base: id.into(),
+    }
 }
 
 pub fn detect() -> Vec<ProviderCredInfo> {
@@ -383,14 +387,11 @@ mod tests {
         }"#;
         let entries = parse_opencode_auth(raw);
         assert_eq!(entries.len(), 4);
-        assert!(entries
-            .iter()
-            .any(|(k, c)| k == "openai"
-                && matches!(c, OpencodeCred::ChatGptOauth { account_id, expires_ms, .. }
+        assert!(entries.iter().any(|(k, c)| k == "openai"
+            && matches!(c, OpencodeCred::ChatGptOauth { account_id, expires_ms, .. }
                     if account_id == "acc-1" && *expires_ms == 1786000000000)));
-        assert!(entries
-            .iter()
-            .any(|(k, c)| k == "kimi-for-coding" && matches!(c, OpencodeCred::ApiKey(s) if s == "sk-kimi-xxx")));
+        assert!(entries.iter().any(|(k, c)| k == "kimi-for-coding"
+            && matches!(c, OpencodeCred::ApiKey(s) if s == "sk-kimi-xxx")));
     }
 
     #[test]

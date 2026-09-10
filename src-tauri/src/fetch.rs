@@ -73,7 +73,10 @@ pub async fn get_with_auth(
 }
 
 /// GET endpoint with arbitrary headers; returns (status, body truncated to 1MB, Retry-After seconds).
-pub async fn get_json(endpoint: &str, headers: &[(&str, &str)]) -> Result<(u16, String, Option<u64>), String> {
+pub async fn get_json(
+    endpoint: &str,
+    headers: &[(&str, &str)],
+) -> Result<(u16, String, Option<u64>), String> {
     get_json_via(http_client(), endpoint, headers).await
 }
 
@@ -89,18 +92,22 @@ async fn get_json_via(
     for (name, value) in headers {
         req = req.header(*name, *value);
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("网络错误: {}", e))?;
+    let resp = req.send().await.map_err(|e| format!("网络错误: {}", e))?;
     let status = resp.status().as_u16();
-    let retry_after = resp.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
+    let retry_after = resp
+        .headers()
+        .get("retry-after")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
     let text = read_capped_body(resp, 1024 * 1024).await?;
     Ok((status, text, retry_after))
 }
 
 /// POST form data; returns (status, body truncated to 1MB, Retry-After seconds).
-pub async fn post_form(endpoint: &str, form: &[(&str, &str)]) -> Result<(u16, String, Option<u64>), String> {
+pub async fn post_form(
+    endpoint: &str,
+    form: &[(&str, &str)],
+) -> Result<(u16, String, Option<u64>), String> {
     post_form_via(http_client(), endpoint, form).await
 }
 
@@ -117,7 +124,11 @@ async fn post_form_via(
         .await
         .map_err(|e| format!("网络错误: {}", e))?;
     let status = resp.status().as_u16();
-    let retry_after = resp.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
+    let retry_after = resp
+        .headers()
+        .get("retry-after")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
     let text = read_capped_body(resp, 1024 * 1024).await?;
     Ok((status, text, retry_after))
 }
@@ -144,7 +155,11 @@ pub async fn post_json_ua(
         .await
         .map_err(|e| format!("网络错误: {}", e))?;
     let status = resp.status().as_u16();
-    let retry_after = resp.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
+    let retry_after = resp
+        .headers()
+        .get("retry-after")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| parse_retry_after(h, std::time::SystemTime::now()));
     let text = read_capped_body(resp, 1024 * 1024).await?;
     Ok((status, text, retry_after))
 }
@@ -153,10 +168,8 @@ pub async fn post_json_ua(
 async fn read_capped_body(resp: reqwest::Response, max_bytes: usize) -> Result<String, String> {
     use futures_util::TryStreamExt;
     use tokio::io::AsyncReadExt;
-    let mut stream = tokio_util::io::StreamReader::new(
-        resp.bytes_stream()
-            .map_err(std::io::Error::other),
-    );
+    let mut stream =
+        tokio_util::io::StreamReader::new(resp.bytes_stream().map_err(std::io::Error::other));
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     loop {
@@ -227,8 +240,14 @@ mod tests {
     fn retry_after_seconds_dates_and_invalid_values() {
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1445412420);
         assert_eq!(parse_retry_after("120", now), Some(120));
-        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT", now), Some(60));
-        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:26:00 GMT", now), Some(0));
+        assert_eq!(
+            parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT", now),
+            Some(60)
+        );
+        assert_eq!(
+            parse_retry_after("Wed, 21 Oct 2015 07:26:00 GMT", now),
+            Some(0)
+        );
         assert_eq!(parse_retry_after("invalid", now), None);
         assert_eq!(parse_retry_after("-1", now), None);
     }
@@ -317,9 +336,10 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/quota"))
             .and(header("x-api-key", "k-1"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                r#"{ "data": { "usage": { "used": 40, "limit": 100 } } }"#,
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"{ "data": { "usage": { "used": 40, "limit": 100 } } }"#),
+            )
             .mount(&server)
             .await;
         let def = crate::settings::CustomProvider {

@@ -14,17 +14,17 @@ fn db_path() -> std::path::PathBuf {
 }
 
 fn open_db(path: &std::path::Path) -> rusqlite::Result<Connection> {
-        let conn = Connection::open(path)?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS samples (
+    let conn = Connection::open(path)?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS samples (
                 provider TEXT NOT NULL,
                 label    TEXT NOT NULL,
                 ts       INTEGER NOT NULL,
                 used_pct REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_samples ON samples(provider, label, ts);",
-        )?;
-        Ok(conn)
+    )?;
+    Ok(conn)
 }
 
 fn db() -> std::sync::MutexGuard<'static, Option<Connection>> {
@@ -58,7 +58,9 @@ pub fn record(snap: &QuotaSnapshot) {
 pub fn provider_history(provider: &str) -> std::collections::BTreeMap<String, Vec<(i64, f64)>> {
     let mut out = std::collections::BTreeMap::new();
     let guard = db();
-    let Some(conn) = guard.as_ref() else { return out };
+    let Some(conn) = guard.as_ref() else {
+        return out;
+    };
     let cutoff = crate::providers::now_secs() - 7 * 86400;
     let mut stmt = match conn.prepare(
         "SELECT label, ts, used_pct FROM samples WHERE provider = ?1 AND ts >= ?2 ORDER BY ts",

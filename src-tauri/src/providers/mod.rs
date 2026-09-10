@@ -76,7 +76,9 @@ pub enum ProviderError {
     },
     AuthExpired,
     CredentialMissing,
-    CredentialCorrupt { torn: bool },
+    CredentialCorrupt {
+        torn: bool,
+    },
     ParseFailed,
     Network,
     Internal,
@@ -113,10 +115,7 @@ pub fn now_secs() -> EpochSecs {
 /// Fetch one provider instance (方案 B): id is "codex" / "codex#opencode" /
 /// custom def id. Stamp the snapshot with the instance id + display name so
 /// rows, toasts and history are per-account.
-pub async fn fetch_instance(
-    id: &str,
-    name: &str,
-) -> Result<QuotaSnapshot, ProviderError> {
+pub async fn fetch_instance(id: &str, name: &str) -> Result<QuotaSnapshot, ProviderError> {
     // custom monitors: id is the def id ("cp-...")
     let s = crate::settings::load();
     if let Some(def) = s.custom_providers.iter().find(|d| d.id == id) {

@@ -4,11 +4,11 @@
 // E5 toasts (>=90% crossing with 85% hysteresis + reset moment) live here.
 use crate::providers::{self, QuotaSnapshot};
 use crate::settings;
+use futures_util::FutureExt;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
-use futures_util::FutureExt;
 
 fn period_for(base: &str, custom_minutes: Option<u64>) -> u64 {
     match base {
@@ -33,9 +33,14 @@ fn retry_delay(backoff: u64, period: u64, server: Option<u64>, jitter: i32) -> u
     varied.max(period).max(server.unwrap_or(0))
 }
 
-async fn isolate_fetch<F: std::future::Future<Output = Result<QuotaSnapshot, providers::ProviderError>>>(f: F)
-    -> Result<QuotaSnapshot, providers::ProviderError> {
-    std::panic::AssertUnwindSafe(f).catch_unwind().await
+async fn isolate_fetch<
+    F: std::future::Future<Output = Result<QuotaSnapshot, providers::ProviderError>>,
+>(
+    f: F,
+) -> Result<QuotaSnapshot, providers::ProviderError> {
+    std::panic::AssertUnwindSafe(f)
+        .catch_unwind()
+        .await
         .unwrap_or(Err(providers::ProviderError::Internal))
 }
 
@@ -69,7 +74,13 @@ pub fn last_states() -> Vec<(String, String, Option<String>)> {
         .lock()
         .map(|m| {
             m.values()
-                .map(|s| (s.provider_id.clone(), s.provider_name.clone(), s.error.clone()))
+                .map(|s| {
+                    (
+                        s.provider_id.clone(),
+                        s.provider_name.clone(),
+                        s.error.clone(),
+                    )
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -143,7 +154,10 @@ fn evaluate_alerts(app: &AppHandle, prev: Option<QuotaSnapshot>, snap: &QuotaSna
                 if let Some(pw) = p.windows.iter().find(|pw| pw.label == w.label) {
                     if let (Some(pt), Some(nt)) = (pw.resets_at, w.resets_at) {
                         if pt <= now && nt > pt && w.used_percent < pw.used_percent {
-                            toast(app, &format!("{} {} 已重置，放开用", snap.provider_name, w.label));
+                            toast(
+                                app,
+                                &format!("{} {} 已重置，放开用", snap.provider_name, w.label),
+                            );
                         }
                     }
                 }
@@ -175,10 +189,7 @@ where
                     let mut snap = providers::sanitize(snap);
                     snap.stale_after_secs = period_secs.saturating_add(60).max(600);
                     backoff = period_secs;
-                    let prev = last()
-                        .lock()
-                        .ok()
-                        .and_then(|m| m.get(&id).cloned());
+                    let prev = last().lock().ok().and_then(|m| m.get(&id).cloned());
                     evaluate_alerts(&app, prev, &snap);
                     crate::history::record(&snap); // E8: 7-day local history
                     if let Ok(mut m) = last().lock() {
@@ -201,9 +212,12 @@ where
                 }
             }
             if limited {
-                let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default().subsec_nanos();
-                let mut remaining = retry_delay(backoff, period_secs, server_delay, (nanos % 41) as i32 - 20);
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos();
+                let mut remaining =
+                    retry_delay(backoff, period_secs, server_delay, (nanos % 41) as i32 - 20);
                 // Ignore manual refresh during cooldown. Chunk huge server hints
                 // to avoid Instant overflow; the task remains abortable.
                 while remaining > 0 {
@@ -227,7 +241,8 @@ static TASKS: OnceLock<
     Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
 > = OnceLock::new();
 
-fn tasks() -> &'static Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>> {
+fn tasks() -> &'static Mutex<std::collections::HashMap<String, tauri::async_runtime::JoinHandle<()>>>
+{
     TASKS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -242,11 +257,10 @@ fn desired() -> Vec<crate::credentials::InstanceDesc> {
             s.enabled_providers.is_empty() || s.enabled_providers.iter().any(|p| p == base)
         }
     };
-    let mut out: Vec<crate::credentials::InstanceDesc> =
-        crate::credentials::discover_instances()
-            .into_iter()
-            .filter(|i| enabled_base(&i.base) && !s.disabled_instances.contains(&i.id))
-            .collect();
+    let mut out: Vec<crate::credentials::InstanceDesc> = crate::credentials::discover_instances()
+        .into_iter()
+        .filter(|i| enabled_base(&i.base) && !s.disabled_instances.contains(&i.id))
+        .collect();
     for def in &s.custom_providers {
         out.push(crate::credentials::InstanceDesc {
             id: def.id.clone(),
@@ -307,16 +321,11 @@ pub fn sync(app: AppHandle) {
         }
         let id2 = inst.id.clone();
         let name2 = inst.name.clone();
-        let handle = spawn_provider(
-            app.clone(),
-            inst.id.clone(),
-            inst.name.clone(),
-            move || {
-                let id = id2.clone();
-                let name = name2.clone();
-                async move { providers::fetch_instance(&id, &name).await }
-            },
-        );
+        let handle = spawn_provider(app.clone(), inst.id.clone(), inst.name.clone(), move || {
+            let id = id2.clone();
+            let name = name2.clone();
+            async move { providers::fetch_instance(&id, &name).await }
+        });
         m.insert(inst.id.clone(), handle);
         spawned.push(inst.id.clone());
     }
@@ -352,6 +361,10 @@ mod tests {
     async fn panic_becomes_error_and_next_fetch_can_run() {
         let result = isolate_fetch(async { panic!("fixture panic") }).await;
         assert!(matches!(result, Err(providers::ProviderError::Internal)));
-        assert!(isolate_fetch(async { Ok(QuotaSnapshot::ok("test", "Test", None, vec![], "official")) }).await.is_ok());
+        assert!(isolate_fetch(async {
+            Ok(QuotaSnapshot::ok("test", "Test", None, vec![], "official"))
+        })
+        .await
+        .is_ok());
     }
 }

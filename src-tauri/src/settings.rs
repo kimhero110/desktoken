@@ -112,8 +112,12 @@ pub fn app_data_dir() -> PathBuf {
         std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
     );
     #[cfg(all(unix, not(target_os = "macos")))]
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .unwrap_or_else(|_| format!("{}/.config", std::env::var("HOME").unwrap_or_else(|_| ".".into())));
+    let base = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
+        format!(
+            "{}/.config",
+            std::env::var("HOME").unwrap_or_else(|_| ".".into())
+        )
+    });
     PathBuf::from(base).join("quotabar")
 }
 

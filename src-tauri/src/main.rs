@@ -28,10 +28,6 @@ fn is_zh_locale() -> bool {
     lang_str_is_chinese(&std::env::var("LANG").unwrap_or_default())
         || lang_str_is_chinese(&std::env::var("LC_ALL").unwrap_or_default())
 }
-mod settings;
-mod task_monitor;
-mod task_integration;
-mod task_install;
 mod atomic_file;
 mod autostart;
 mod credentials;
@@ -41,6 +37,10 @@ mod history;
 mod oauth;
 mod poller;
 mod providers;
+mod settings;
+mod task_install;
+mod task_integration;
+mod task_monitor;
 mod updater_check;
 
 use settings::Settings;
@@ -100,7 +100,7 @@ fn apply_noactivate(_window: &WebviewWindow) {}
 fn apply_rounded_corners(window: &WebviewWindow) {
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     if let Ok(hwnd) = window.hwnd() {
         let raw: HWND = hwnd.0 as HWND;
@@ -135,7 +135,9 @@ fn clamp_position(window: &WebviewWindow, s: &Settings) -> tauri::Result<()> {
     let primary = window
         .primary_monitor()?
         .or_else(|| monitors.first().cloned());
-    let Some(primary) = primary else { return Ok(()) };
+    let Some(primary) = primary else {
+        return Ok(());
+    };
 
     let (mut x, mut y) = match (s.window_x, s.window_y) {
         (Some(x), Some(y)) => (x, y),
@@ -249,18 +251,73 @@ fn menu_ids() -> [&'static str; 8] {
 }
 
 fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let refresh = MenuItemBuilder::with_id(MENU_REFRESH, if is_zh_locale() { "立即刷新" } else { "Refresh Now" })
-        .enabled(!refresh_cooling_down())
+    let refresh = MenuItemBuilder::with_id(
+        MENU_REFRESH,
+        if is_zh_locale() {
+            "立即刷新"
+        } else {
+            "Refresh Now"
+        },
+    )
+    .enabled(!refresh_cooling_down())
+    .build(app)?;
+    let mini = CheckMenuItemBuilder::with_id(
+        MENU_MINI_MODE,
+        if is_zh_locale() {
+            "迷你模式"
+        } else {
+            "Mini Mode"
+        },
+    )
+    .checked(settings::load().mini_mode)
+    .build(app)?;
+    let diag = MenuItemBuilder::with_id(
+        MENU_DIAG,
+        if is_zh_locale() {
+            "复制诊断信息"
+        } else {
+            "Copy Diagnostics"
+        },
+    )
+    .build(app)?;
+    let check_update = MenuItemBuilder::with_id(
+        MENU_CHECK_UPDATE,
+        if is_zh_locale() {
+            "检查更新"
+        } else {
+            "Check for Updates"
+        },
+    )
+    .build(app)?;
+    let report = MenuItemBuilder::with_id(
+        MENU_REPORT,
+        if is_zh_locale() {
+            "在 GitHub 报告问题"
+        } else {
+            "Report Issue on GitHub"
+        },
+    )
+    .build(app)?;
+    let sponsor = MenuItemBuilder::with_id(
+        MENU_SPONSOR,
+        if is_zh_locale() {
+            "请作者喝杯咖啡"
+        } else {
+            "Buy Me a Coffee"
+        },
+    )
+    .build(app)?;
+    let settings_item = MenuItemBuilder::with_id(
+        MENU_SETTINGS,
+        if is_zh_locale() {
+            "设置..."
+        } else {
+            "Settings..."
+        },
+    )
+    .build(app)?;
+    let quit = MenuItemBuilder::with_id(MENU_QUIT, if is_zh_locale() { "退出" } else { "Quit" })
         .build(app)?;
-    let mini = CheckMenuItemBuilder::with_id(MENU_MINI_MODE, if is_zh_locale() { "迷你模式" } else { "Mini Mode" })
-        .checked(settings::load().mini_mode)
-        .build(app)?;
-    let diag = MenuItemBuilder::with_id(MENU_DIAG, if is_zh_locale() { "复制诊断信息" } else { "Copy Diagnostics" }).build(app)?;
-    let check_update = MenuItemBuilder::with_id(MENU_CHECK_UPDATE, if is_zh_locale() { "检查更新" } else { "Check for Updates" }).build(app)?;
-    let report = MenuItemBuilder::with_id(MENU_REPORT, if is_zh_locale() { "在 GitHub 报告问题" } else { "Report Issue on GitHub" }).build(app)?;
-    let sponsor = MenuItemBuilder::with_id(MENU_SPONSOR, if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" }).build(app)?;
-    let settings_item = MenuItemBuilder::with_id(MENU_SETTINGS, if is_zh_locale() { "设置..." } else { "Settings..." }).build(app)?;
-    let quit = MenuItemBuilder::with_id(MENU_QUIT, if is_zh_locale() { "退出" } else { "Quit" }).build(app)?;
     MenuBuilder::new(app)
         .items(&[
             &refresh,
@@ -303,7 +360,11 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
                 .notification()
                 .builder()
                 .title("QuotaBar")
-                .body(if ok { "诊断信息已复制（已脱敏）" } else { "复制失败" })
+                .body(if ok {
+                    "诊断信息已复制（已脱敏）"
+                } else {
+                    "复制失败"
+                })
                 .show();
         }
         MENU_CHECK_UPDATE => {
@@ -484,7 +545,9 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     if !url_is_allowed(&url) {
         return Err("不允许的链接".into());
     }
-    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 /// Allowlist for open_url: our repo pages + the official provider consoles the
@@ -536,7 +599,9 @@ fn begin_drag(window: WebviewWindow) {
         if GetCursorPos(&mut pt) == 0 {
             return;
         }
-        let Ok(win_pos) = window.outer_position() else { return };
+        let Ok(win_pos) = window.outer_position() else {
+            return;
+        };
         let (cx0, cy0) = (pt.x, pt.y);
         let (wx0, wy0) = (win_pos.x, win_pos.y);
         loop {
@@ -724,11 +789,17 @@ fn apply_toolwindow(window: &WebviewWindow) {
             SetWindowPos(
                 raw,
                 std::ptr::null_mut(),
-                0, 0, 0, 0,
+                0,
+                0,
+                0,
+                0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
             );
             let confirm = GetWindowLongPtrW(raw, GWL_EXSTYLE);
-            rustlog(format!("sponsor toolwindow: before=0x{:X} confirm=0x{:X}", before, confirm));
+            rustlog(format!(
+                "sponsor toolwindow: before=0x{:X} confirm=0x{:X}",
+                before, confirm
+            ));
         }
     }
 }
@@ -789,7 +860,11 @@ fn open_sponsor_window(app: &tauri::AppHandle) {
     }
 
     let mut b = WebviewWindowBuilder::new(app, "sponsor", WebviewUrl::App("sponsor.html".into()))
-        .title(if is_zh_locale() { "请作者喝杯咖啡" } else { "Buy Me a Coffee" })
+        .title(if is_zh_locale() {
+            "请作者喝杯咖啡"
+        } else {
+            "Buy Me a Coffee"
+        })
         .inner_size(logical_w, logical_h)
         .resizable(false)
         .maximizable(false)
@@ -820,7 +895,12 @@ fn open_sponsor_window(app: &tauri::AppHandle) {
             #[cfg(target_os = "macos")]
             {
                 use window_vibrancy::NSVisualEffectMaterial;
-                let _ = window_vibrancy::apply_vibrancy(&w, NSVisualEffectMaterial::HudWindow, None, None);
+                let _ = window_vibrancy::apply_vibrancy(
+                    &w,
+                    NSVisualEffectMaterial::HudWindow,
+                    None,
+                    None,
+                );
             }
             // 1s fallback: a stuck resource can never strand an invisible
             // always-on-top window
@@ -913,7 +993,11 @@ fn delete_manual_key(provider_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_provider_enabled(app: tauri::AppHandle, provider_id: String, enabled: bool) -> Result<(), String> {
+fn set_provider_enabled(
+    app: tauri::AppHandle,
+    provider_id: String,
+    enabled: bool,
+) -> Result<(), String> {
     settings::edit(|s| {
         if enabled && !s.enabled_providers.contains(&provider_id) {
             s.enabled_providers.push(provider_id.clone());
@@ -933,7 +1017,11 @@ fn list_custom_providers() -> Vec<settings::CustomProvider> {
 }
 
 #[tauri::command]
-fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider, key: Option<String>) -> Result<(), String> {
+fn save_custom_provider(
+    app: tauri::AppHandle,
+    mut def: settings::CustomProvider,
+    key: Option<String>,
+) -> Result<(), String> {
     if def.name.trim().is_empty() || def.endpoint.trim().is_empty() {
         return Err("名称与端点 URL 不能为空".into());
     }
@@ -946,7 +1034,9 @@ fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider
         Some("localhost") | Some("127.0.0.1") | Some("[::1]")
     );
     if !(endpoint.scheme() == "https" || (endpoint.scheme() == "http" && loopback)) {
-        return Err("端点必须使用 https（本机 http://127.0.0.1 除外）：API key 会随请求发送".into());
+        return Err(
+            "端点必须使用 https（本机 http://127.0.0.1 除外）：API key 会随请求发送".into(),
+        );
     }
     def.poll_minutes = def.poll_minutes.clamp(1, 1440);
     if let Some(k) = &key {
@@ -968,8 +1058,7 @@ fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider
 
 #[tauri::command]
 fn delete_custom_provider(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    settings::try_edit(|s| s.custom_providers.retain(|p| p.id != id))
-        .map_err(|e| e.to_string())?;
+    settings::try_edit(|s| s.custom_providers.retain(|p| p.id != id)).map_err(|e| e.to_string())?;
     let _ = credentials::keyring_delete(&format!("custom/{}", id));
     poller::sync(app); // hot reload
     Ok(())
@@ -989,22 +1078,33 @@ async fn verify_provider(provider_id: String, custom_id: Option<String>) -> Resu
         let key = credentials::keyring_get(&format!("custom/{}", cid)).unwrap_or_default();
         return fetch::verify_custom(&def, &key).await;
     }
-    let (endpoint, header, prefix) = credentials::manual_key_target(&provider_id)
-        .ok_or("该平台不支持手动 key")?;
+    let (endpoint, header, prefix) =
+        credentials::manual_key_target(&provider_id).ok_or("该平台不支持手动 key")?;
     let key = credentials::keyring_get(&provider_id).ok_or("尚未保存 key")?;
     let (status, body, _) = fetch::get_with_auth(endpoint, header, prefix, &key).await?;
     match status {
         200..=299 => Ok(format!("验证成功（HTTP {}）", status)),
-        401 | 403 => Err(format!("HTTP {} — key 无效或已过期，去控制台重新生成", status)),
+        401 | 403 => Err(format!(
+            "HTTP {} — key 无效或已过期，去控制台重新生成",
+            status
+        )),
         429 => Err("HTTP 429 — 请求太频繁，30 秒后再试".into()),
-        _ => Err(format!("HTTP {} — {}", status, body.chars().take(120).collect::<String>())),
+        _ => Err(format!(
+            "HTTP {} — {}",
+            status,
+            body.chars().take(120).collect::<String>()
+        )),
     }
 }
 
 // ---------------------------------------------------------------------------
 fn main() {
-    if task_integration::handle_cli() { return; }
-    if task_monitor::handle_cli() { return; }
+    if task_integration::handle_cli() {
+        return;
+    }
+    if task_monitor::handle_cli() {
+        return;
+    }
     // AUMID: makes Windows toasts attributable to QuotaBar (E5/M5).
     #[cfg(target_os = "windows")]
     unsafe {
@@ -1075,17 +1175,18 @@ fn main() {
             task_monitor::start(app.handle().clone());
             let s = settings::load();
 
-            let mut wb = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("QuotaBar")
-                .inner_size(s.width, WIN_H)
-                .resizable(false)
-                .maximizable(false)
-                .minimizable(false)
-                .decorations(false)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .focused(false)
-                .visible(false);
+            let mut wb =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("QuotaBar")
+                    .inner_size(s.width, WIN_H)
+                    .resizable(false)
+                    .maximizable(false)
+                    .minimizable(false)
+                    .decorations(false)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .focused(false)
+                    .visible(false);
             // transparent() is Windows/Linux-only in Tauri 2; on macOS
             // window-vibrancy sets up transparency itself.
             #[cfg(not(target_os = "macos"))]
@@ -1259,7 +1360,10 @@ mod tests {
             MENU_QUIT,
         ];
         for id in menu_ids() {
-            assert!(handled.contains(&id), "menu id '{id}' has no handler branch");
+            assert!(
+                handled.contains(&id),
+                "menu id '{id}' has no handler branch"
+            );
         }
     }
 
@@ -1277,7 +1381,10 @@ mod tests {
             .join("src")
             .join("sponsor.jpg");
         let bytes = std::fs::read(&path).unwrap_or_else(|e| {
-            panic!("sponsor.jpg 缺失或不可读（{}）：打包会裂图。文件应位于 src/sponsor.jpg", e)
+            panic!(
+                "sponsor.jpg 缺失或不可读（{}）：打包会裂图。文件应位于 src/sponsor.jpg",
+                e
+            )
         });
         let hash = format!("{:x}", sha2::Sha256::digest(&bytes));
         assert_eq!(

@@ -96,7 +96,10 @@ mod tests {
     #[test]
     fn missing_paths_is_parse_error() {
         let body = r#"{ "data": {} }"#;
-        assert!(matches!(parse(&def(), body), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse(&def(), body),
+            Err(ProviderError::ParseFailed)
+        ));
     }
 
     #[test]

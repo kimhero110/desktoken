@@ -161,18 +161,28 @@ fn write_event(dir: &Path, task: &Task) -> std::io::Result<()> {
 pub fn handle_cli() -> bool {
     let args: Vec<_> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("task-watch") {
-        let seconds = args.get(2).and_then(|s| s.parse::<u64>().ok()).unwrap_or(30).clamp(1, 120);
+        let seconds = args
+            .get(2)
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(30)
+            .clamp(1, 120);
         let started = now();
         let mut state = Store::default();
         let mut previous = String::new();
         while now() - started < (seconds * 1000) as i64 {
             let at = now();
-            for task in drain(&directory()) { let live = task.updated_at >= started; state.apply(task, at, live); }
+            for task in drain(&directory()) {
+                let live = task.updated_at >= started;
+                state.apply(task, at, live);
+            }
             let alerts = state.tick(at);
             let snapshot = state.snapshot();
             let serialized = serde_json::to_string(&snapshot).unwrap_or_default();
             if serialized != previous || !alerts.is_empty() {
-                println!("{}", serde_json::json!({"tasks":snapshot,"notification_candidates":alerts}));
+                println!(
+                    "{}",
+                    serde_json::json!({"tasks":snapshot,"notification_candidates":alerts})
+                );
                 previous = serialized;
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -213,23 +223,25 @@ impl Store {
             || task.session_id.is_empty()
             || task.session_id.len() > 256
             || task.project.chars().count() > 80
-            || (task.observed_at_ns != 0 && task.observed_at_ns.div_euclid(1_000_000) != task.updated_at)
+            || (task.observed_at_ns != 0
+                && task.observed_at_ns.div_euclid(1_000_000) != task.updated_at)
             || task.updated_at > at + 5000
             || at.saturating_sub(task.updated_at) > MAX_AGE
         {
             return;
         }
         let key = format!("{}:{}", task.tool, task.session_id);
-        if self
-            .tasks
-            .get(&key)
-            .is_some_and(|old| (old.updated_at, old.observed_at_ns) >= (task.updated_at, task.observed_at_ns))
-        {
+        if self.tasks.get(&key).is_some_and(|old| {
+            (old.updated_at, old.observed_at_ns) >= (task.updated_at, task.observed_at_ns)
+        }) {
             return;
         }
         // Some runtimes emit idle after error. Preserve the error until actual new work.
         if task.session_closed {
-            task.state = self.tasks.get(&key).filter(|t| matches!(t.state, State::Ended | State::Failed | State::Interrupted))
+            task.state = self
+                .tasks
+                .get(&key)
+                .filter(|t| matches!(t.state, State::Ended | State::Failed | State::Interrupted))
                 .map_or(State::Unknown, |t| t.state);
         }
         if task.state == State::Ended {
@@ -316,22 +328,37 @@ pub fn set_task_notifications(enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 pub fn test_task_notification(app: tauri::AppHandle) -> Result<(), String> {
-    app.notification().builder().title("QuotaBar · 测试通知")
+    app.notification()
+        .builder()
+        .title("QuotaBar · 测试通知")
         .body("这是一条测试通知，不代表实际任务结束。能看到它就说明当前系统允许显示通知。")
-        .show().map_err(|e| e.to_string())
+        .show()
+        .map_err(|e| e.to_string())
 }
 
 fn drain(dir: &Path) -> Vec<Task> {
     let mut incoming = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "json")).take(512) {
+        for entry in entries
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .take(512)
+        {
             let path = entry.path();
             // Read errors are transient (Windows sharing locks, antivirus). Retry next tick.
             // Bound the actual read, not a metadata snapshot that can change before opening.
-            let Ok(file) = std::fs::File::open(&path) else { continue; };
+            let Ok(file) = std::fs::File::open(&path) else {
+                continue;
+            };
             let mut raw = Vec::new();
-            if file.take(4097).read_to_end(&mut raw).is_err() { continue; }
-            if raw.len() <= 4096 { if let Ok(task) = serde_json::from_slice::<Task>(&raw) { incoming.push(task); } }
+            if file.take(4097).read_to_end(&mut raw).is_err() {
+                continue;
+            }
+            if raw.len() <= 4096 {
+                if let Ok(task) = serde_json::from_slice::<Task>(&raw) {
+                    incoming.push(task);
+                }
+            }
             let _ = std::fs::remove_file(path);
         }
     }
@@ -394,40 +421,53 @@ mod tests {
         assert_eq!(s.snapshot()[0].state, State::Ended);
         assert_eq!(s.tick(2200).len(), 1);
         for terminal in ["StopFailure", "Interrupt"] {
-            let mut state=Store::default();
-            let ended=event(terminal,100);
-            state.apply(ended.clone(),100,true);
-            state.apply(event("SessionEnd",101),101,true);
-            assert_eq!(state.snapshot()[0].state,ended.state);
-            assert_eq!(state.tick(2200).len(),1);
+            let mut state = Store::default();
+            let ended = event(terminal, 100);
+            state.apply(ended.clone(), 100, true);
+            state.apply(event("SessionEnd", 101), 101, true);
+            assert_eq!(state.snapshot()[0].state, ended.state);
+            assert_eq!(state.tick(2200).len(), 1);
         }
-        let mut interrupted_without_evidence=Store::default();
-        interrupted_without_evidence.apply(event("UserPromptSubmit",100),100,true);
-        interrupted_without_evidence.apply(event("SessionEnd",101),101,true);
-        assert_eq!(interrupted_without_evidence.snapshot()[0].state,State::Unknown);
+        let mut interrupted_without_evidence = Store::default();
+        interrupted_without_evidence.apply(event("UserPromptSubmit", 100), 100, true);
+        interrupted_without_evidence.apply(event("SessionEnd", 101), 101, true);
+        assert_eq!(
+            interrupted_without_evidence.snapshot()[0].state,
+            State::Unknown
+        );
         assert!(interrupted_without_evidence.tick(2200).is_empty());
     }
     #[test]
     fn separate_events_in_same_millisecond_must_not_be_treated_as_duplicates() {
-        let mut s=Store::default();
-        let mut first=event("UserPromptSubmit",100);first.observed_at_ns=100_000_001;
-        let mut second=event("Stop",100);second.observed_at_ns=100_000_002;
-        s.apply(first,100,true);s.apply(second,100,true);
-        assert_eq!(s.snapshot()[0].state,State::Ended);
-        assert_eq!(s.tick(2200).len(),1);
+        let mut s = Store::default();
+        let mut first = event("UserPromptSubmit", 100);
+        first.observed_at_ns = 100_000_001;
+        let mut second = event("Stop", 100);
+        second.observed_at_ns = 100_000_002;
+        s.apply(first, 100, true);
+        s.apply(second, 100, true);
+        assert_eq!(s.snapshot()[0].state, State::Ended);
+        assert_eq!(s.tick(2200).len(), 1);
     }
     #[cfg(windows)]
     #[test]
     fn temporarily_unreadable_event_must_survive_drain() {
         use std::os::windows::fs::OpenOptionsExt;
-        let dir=crate::settings::app_data_dir().join("locked-event");
-        write_event(&dir,&event("Stop",100)).unwrap();
-        let path=dir.join(format!("100-{}.json",std::process::id()));
-        let locked=std::fs::OpenOptions::new().read(true).share_mode(4).open(&path).unwrap();
+        let dir = crate::settings::app_data_dir().join("locked-event");
+        write_event(&dir, &event("Stop", 100)).unwrap();
+        let path = dir.join(format!("100-{}.json", std::process::id()));
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(4)
+            .open(&path)
+            .unwrap();
         assert!(drain(&dir).is_empty());
         drop(locked);
-        assert!(path.exists(), "transient read failure must not destroy the event");
-        assert_eq!(drain(&dir).len(),1);
+        assert!(
+            path.exists(),
+            "transient read failure must not destroy the event"
+        );
+        assert_eq!(drain(&dir).len(), 1);
     }
     fn event(name: &str, at: i64) -> Task {
         normalize("codex", &serde_json::json!({"session_id":"one", "cwd":"C:\\secret\\demo", "hook_event_name":name, "prompt":"SECRET"}), at).unwrap()
@@ -498,7 +538,8 @@ mod tests {
         s.apply(event("Stop", i64::MIN), 1000, true);
         assert!(s.snapshot().is_empty());
         for i in 1..=110 {
-            let mut t = event("Stop", i); t.session_id = i.to_string();
+            let mut t = event("Stop", i);
+            t.session_id = i.to_string();
             s.apply(t, 1000, false);
         }
         assert_eq!(s.snapshot().len(), 100);

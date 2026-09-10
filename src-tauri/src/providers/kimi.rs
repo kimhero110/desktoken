@@ -36,7 +36,9 @@ pub async fn resolve_token() -> Result<(String, &'static str), ProviderError> {
 }
 
 /// Kimi OAuth device-flow token endpoint.
-async fn refresh_call(refresh_token: String) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
+async fn refresh_call(
+    refresh_token: String,
+) -> Result<oauth::RefreshResult, oauth::RefreshFailure> {
     const TOKEN_URL: &str = "https://auth.kimi.com/api/oauth/token";
     const CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
     let (status, body, _retry_after) = fetch::post_form(
@@ -186,7 +188,9 @@ pub fn parse_value(v: &serde_json::Value) -> Result<QuotaSnapshot, ProviderError
             let s = l.strip_prefix("LEVEL_").unwrap_or(l);
             let mut c = s.chars();
             match c.next() {
-                Some(f) => f.to_uppercase().collect::<String>() + c.as_str().to_lowercase().as_str(),
+                Some(f) => {
+                    f.to_uppercase().collect::<String>() + c.as_str().to_lowercase().as_str()
+                }
                 None => s.to_string(),
             }
         });
@@ -194,9 +198,10 @@ pub fn parse_value(v: &serde_json::Value) -> Result<QuotaSnapshot, ProviderError
 }
 
 async fn fetch_with_bearer(token: &str) -> Result<QuotaSnapshot, ProviderError> {
-    let (status, body, retry_after) = fetch::get_with_auth(ENDPOINT, "Authorization", "Bearer ", token)
-        .await
-        .map_err(|_| ProviderError::Network)?;
+    let (status, body, retry_after) =
+        fetch::get_with_auth(ENDPOINT, "Authorization", "Bearer ", token)
+            .await
+            .map_err(|_| ProviderError::Network)?;
     match status {
         200..=299 => parse(&body),
         401 | 403 => Err(ProviderError::AuthExpired),
@@ -213,16 +218,14 @@ pub async fn fetch_snapshot() -> Result<QuotaSnapshot, ProviderError> {
 /// Multi-instance entry (方案 B): "kimi" (CLI/manual) or "kimi#opencode".
 pub async fn fetch_instance(inst: &str) -> Result<QuotaSnapshot, ProviderError> {
     match inst {
-        "kimi#opencode" => {
-            match crate::credentials::opencode_cred("kimi-for-coding") {
-                Some(crate::credentials::OpencodeCred::ApiKey(k)) => {
-                    let mut s = fetch_with_bearer(&k).await?;
-                    s.source = "manual_key".into();
-                    Ok(s)
-                }
-                _ => Err(ProviderError::CredentialMissing),
+        "kimi#opencode" => match crate::credentials::opencode_cred("kimi-for-coding") {
+            Some(crate::credentials::OpencodeCred::ApiKey(k)) => {
+                let mut s = fetch_with_bearer(&k).await?;
+                s.source = "manual_key".into();
+                Ok(s)
             }
-        }
+            _ => Err(ProviderError::CredentialMissing),
+        },
         _ => fetch_snapshot().await,
     }
 }
@@ -266,7 +269,10 @@ mod tests {
     #[test]
     fn malformed_response_is_parse_error() {
         assert!(matches!(parse("not json"), Err(ProviderError::ParseFailed)));
-        assert!(matches!(parse(r#"{"foo": 1}"#), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse(r#"{"foo": 1}"#),
+            Err(ProviderError::ParseFailed)
+        ));
     }
 
     #[test]
@@ -336,20 +342,36 @@ mod tests {
     /// range, or non-positive limit → window ignored (never fabricated zero).
     #[test]
     fn missing_both_or_invalid_fields_are_ignored() {
-        let no_fields = serde_json::json!({ "usage": { "limit": "100", "resetTime": "2026-09-06T04:00:00Z" } });
-        assert!(matches!(parse_value(&no_fields), Err(ProviderError::ParseFailed)));
+        let no_fields =
+            serde_json::json!({ "usage": { "limit": "100", "resetTime": "2026-09-06T04:00:00Z" } });
+        assert!(matches!(
+            parse_value(&no_fields),
+            Err(ProviderError::ParseFailed)
+        ));
 
         let bad_used = serde_json::json!({ "usage": { "limit": "100", "used": "NaN" } });
-        assert!(matches!(parse_value(&bad_used), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse_value(&bad_used),
+            Err(ProviderError::ParseFailed)
+        ));
 
         let bad_remaining = serde_json::json!({ "usage": { "limit": "100", "remaining": "150" } });
-        assert!(matches!(parse_value(&bad_remaining), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse_value(&bad_remaining),
+            Err(ProviderError::ParseFailed)
+        ));
 
         let neg_remaining = serde_json::json!({ "usage": { "limit": "100", "remaining": "-1" } });
-        assert!(matches!(parse_value(&neg_remaining), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse_value(&neg_remaining),
+            Err(ProviderError::ParseFailed)
+        ));
 
         let zero_limit = serde_json::json!({ "usage": { "limit": "0", "remaining": "0" } });
-        assert!(matches!(parse_value(&zero_limit), Err(ProviderError::ParseFailed)));
+        assert!(matches!(
+            parse_value(&zero_limit),
+            Err(ProviderError::ParseFailed)
+        ));
 
         let mixed = serde_json::json!({
           "usage": { "limit": "100", "used": "1" },
@@ -390,7 +412,10 @@ mod tests {
             mk(300, Some(serde_json::json!(1))),
         ];
         for v in &rejects {
-            assert!(matches!(parse_value(v), Err(ProviderError::ParseFailed)), "rejected: {v}");
+            assert!(
+                matches!(parse_value(v), Err(ProviderError::ParseFailed)),
+                "rejected: {v}"
+            );
         }
     }
 }

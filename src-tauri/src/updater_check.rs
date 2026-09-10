@@ -56,7 +56,10 @@ async fn fetch_via_api() -> Option<UpdateInfo> {
     let v: serde_json::Value = serde_json::from_str(&body).ok()?;
     let tag = v.get("tag_name").and_then(|t| t.as_str())?;
     // skip pre-releases (PLAN: 跳预发布)
-    if v.get("prerelease").and_then(|p| p.as_bool()).unwrap_or(false) {
+    if v.get("prerelease")
+        .and_then(|p| p.as_bool())
+        .unwrap_or(false)
+    {
         return None;
     }
     Some(UpdateInfo {
@@ -118,7 +121,10 @@ pub fn maybe_check(app: tauri::AppHandle, force: bool) {
             .unwrap_or(false);
         let info: Option<UpdateInfo> = if fresh_cache && !force {
             s.latest_version.clone().map(|v| UpdateInfo {
-                url: format!("https://github.com/kimhero110/desktoken/releases/tag/v{}", v),
+                url: format!(
+                    "https://github.com/kimhero110/desktoken/releases/tag/v{}",
+                    v
+                ),
                 version: v,
             })
         } else {

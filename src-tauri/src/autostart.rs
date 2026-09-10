@@ -63,7 +63,7 @@ pub fn set_autostart(enabled: bool) -> Result<AutostartWarning, String> {
 #[cfg(target_os = "windows")]
 fn startup_dir() -> Result<std::path::PathBuf, String> {
     use windows::Win32::System::Com::CoTaskMemFree;
-    use windows::Win32::UI::Shell::{FOLDERID_Startup, KNOWN_FOLDER_FLAG, SHGetKnownFolderPath};
+    use windows::Win32::UI::Shell::{FOLDERID_Startup, SHGetKnownFolderPath, KNOWN_FOLDER_FLAG};
     unsafe {
         // windows 0.61.3: (rfid, flags, htoken) -> Result<PWSTR>
         let ptr = SHGetKnownFolderPath(&FOLDERID_Startup, KNOWN_FOLDER_FLAG(0), None)
@@ -103,12 +103,16 @@ fn disable_in(startup: &std::path::Path, exe: &std::path::Path) -> Result<(), St
             Ok(true) => {
                 std::fs::remove_file(&link).map_err(|e| e.to_string())?;
             }
-            Ok(false) => return Err(
-                "Startup 中的 QuotaBar.lnk 不是本程序创建，未删除；未修改任何数据".into(),
-            ),
-            Err(e) => return Err(format!(
-                "无法核对 Startup 快捷方式（{e}），未删除；未修改任何数据"
-            )),
+            Ok(false) => {
+                return Err(
+                    "Startup 中的 QuotaBar.lnk 不是本程序创建，未删除；未修改任何数据".into(),
+                )
+            }
+            Err(e) => {
+                return Err(format!(
+                    "无法核对 Startup 快捷方式（{e}），未删除；未修改任何数据"
+                ))
+            }
         },
     }
     Ok(())
@@ -288,9 +292,8 @@ fn write_shortcut_desc(
             .ok()
             .map_err(|e| format!("COM 初始化失败：{e}"))?;
         let result = (|| -> Result<(), String> {
-            let shell_link: IShellLinkW =
-                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-                    .map_err(|e| format!("创建快捷方式对象失败：{e}"))?;
+            let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+                .map_err(|e| format!("创建快捷方式对象失败：{e}"))?;
             let exe_w = wide(&exe.to_string_lossy());
             shell_link
                 .SetPath(PCWSTR(exe_w.as_ptr()))
@@ -350,9 +353,8 @@ fn shortcut_meta(
             .ok()
             .map_err(|e| format!("COM 初始化失败：{e}"))?;
         let result = (|| -> Result<(Option<std::path::PathBuf>, Option<String>), String> {
-            let shell_link: IShellLinkW =
-                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-                    .map_err(|e| format!("创建快捷方式对象失败：{e}"))?;
+            let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+                .map_err(|e| format!("创建快捷方式对象失败：{e}"))?;
             let persist: IPersistFile = shell_link
                 .cast()
                 .map_err(|e| format!("快捷方式接口转换失败：{e}"))?;
@@ -365,8 +367,8 @@ fn shortcut_meta(
                 .GetPath(&mut buf, std::ptr::null_mut(), SLGP_RAWPATH.0 as u32)
                 .map_err(|e| format!("读取快捷方式目标失败：{e}"))?;
             let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-            let target = (len > 0)
-                .then(|| std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len])));
+            let target =
+                (len > 0).then(|| std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len])));
             // A missing description is normal (foreign shortcuts, older links):
             // absence is data, not an error.
             let mut desc = [0u16; 256];
@@ -466,7 +468,8 @@ mod tests {
     fn legacy_cleanup_conflicting_value_warns_without_blocking() {
         let exe = std::path::Path::new(r"C:\Program Files\QuotaBar\quotabar.exe");
         let (guard, key) = temp_key();
-        key.set_value(LEGACY_VALUE_NAME, &"\"C:\\somewhere else.exe\"").unwrap();
+        key.set_value(LEGACY_VALUE_NAME, &"\"C:\\somewhere else.exe\"")
+            .unwrap();
         let decision = inspect_legacy_run_in(&key, exe);
         let msg = match &decision {
             LegacyRun::Foreign(m) => m.clone(),
@@ -544,7 +547,9 @@ mod tests {
         let err = enable_in(&startup, &mine).unwrap_err();
         assert!(err.contains("未覆盖"), "clear conflict message: {err}");
         // the foreign shortcut still points at the foreign exe
-        let target = shortcut_target(&startup.join(SHORTCUT_NAME)).unwrap().unwrap();
+        let target = shortcut_target(&startup.join(SHORTCUT_NAME))
+            .unwrap()
+            .unwrap();
         assert!(paths_equal(&target, &foreign));
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -566,7 +571,10 @@ mod tests {
         let new_exe = std::env::current_exe().unwrap();
         enable_in(&startup, &new_exe).unwrap();
         let link = startup.join(SHORTCUT_NAME);
-        assert!(paths_equal(&shortcut_target(&link).unwrap().unwrap(), &new_exe));
+        assert!(paths_equal(
+            &shortcut_target(&link).unwrap().unwrap(),
+            &new_exe
+        ));
         disable_in(&startup, &new_exe).unwrap();
         assert!(!link.exists());
         std::fs::remove_dir_all(&dir).unwrap();

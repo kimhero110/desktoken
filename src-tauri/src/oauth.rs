@@ -106,7 +106,10 @@ pub fn jwt_exp(token: &str) -> Option<EpochSecs> {
 /// (access_token, refresh_token, expiry epoch secs) from a credential doc.
 /// Expiry may be a number (secs or ms per spec) or an RFC3339 string
 /// (e.g. Antigravity's keyring blob uses "2026-09-03T01:23:45Z").
-fn extract(doc: &Value, spec: &OAuthFileSpec) -> (Option<String>, Option<String>, Option<EpochSecs>) {
+fn extract(
+    doc: &Value,
+    spec: &OAuthFileSpec,
+) -> (Option<String>, Option<String>, Option<EpochSecs>) {
     let access = json_path_str(doc, spec.access_path).map(|s| s.to_string());
     let refresh = json_path_str(doc, spec.refresh_path).map(|s| s.to_string());
     let expires = match spec.expires_path {
@@ -172,7 +175,9 @@ struct PendingWrite {
 }
 
 fn pending_writes() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, PendingWrite>> {
-    static PENDING: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, PendingWrite>>> = std::sync::OnceLock::new();
+    static PENDING: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<PathBuf, PendingWrite>>,
+    > = std::sync::OnceLock::new();
     PENDING.get_or_init(Default::default)
 }
 
@@ -196,7 +201,14 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = Result<RefreshResult, RefreshFailure>>,
 {
-    resolve_oauth_token_with(path, spec, do_refresh, RENAME_ATTEMPTS, RENAME_BASE_DELAY_MS).await
+    resolve_oauth_token_with(
+        path,
+        spec,
+        do_refresh,
+        RENAME_ATTEMPTS,
+        RENAME_BASE_DELAY_MS,
+    )
+    .await
 }
 
 /// Inner implementation with test-tunable write-back retry policy.
@@ -215,24 +227,37 @@ where
     let mutex = path_mutex(path);
     let _guard = mutex.lock().await;
     let current = read_doc(path);
-    let pending = pending_writes().lock().unwrap_or_else(|e| e.into_inner()).get(path).cloned();
+    let pending = pending_writes()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(path)
+        .cloned();
     let (raw2, doc2) = if let Some(p) = pending {
         match current {
             Ok((raw, doc)) if raw != p.original => {
                 // A changed valid file belongs to the CLI (including logout).
-                pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+                pending_writes()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(path);
                 (raw, doc)
             }
             Ok((raw, _)) => {
                 if write_back(path, &p.doc, rename_attempts, rename_delay_ms).is_ok() {
-                    pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+                    pending_writes()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(path);
                     (serde_json::to_string_pretty(&p.doc).unwrap_or(raw), p.doc)
                 } else {
                     (raw, p.doc)
                 }
             }
             Err(e) if !path.exists() => {
-                pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+                pending_writes()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(path);
                 return Err(e);
             }
             Err(_) => (p.original, p.doc), // transient unreadable file: memory only
@@ -245,7 +270,9 @@ where
         return Ok((t.clone(), "official"));
     }
     let Some(rt) = r2 else {
-        return a2.map(|t| (t, "official")).ok_or(ProviderError::CredentialMissing);
+        return a2
+            .map(|t| (t, "official"))
+            .ok_or(ProviderError::CredentialMissing);
     };
 
     // Step 4: refresh.
@@ -268,7 +295,11 @@ where
 
     // Step 5: merge into the latest doc we read.
     let mut doc = doc2;
-    set_path(&mut doc, spec.access_path, Value::String(rr.access_token.clone()));
+    set_path(
+        &mut doc,
+        spec.access_path,
+        Value::String(rr.access_token.clone()),
+    );
     if let Some(nrt) = &rr.refresh_token {
         set_path(&mut doc, spec.refresh_path, Value::String(nrt.clone()));
     }
@@ -290,7 +321,10 @@ where
             if let Ok(cd) = serde_json::from_str::<Value>(&cur) {
                 let (ca, _, _) = extract(&cd, spec);
                 if let Some(t) = ca {
-                    pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+                    pending_writes()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(path);
                     return Ok((t, "official"));
                 }
             }
@@ -299,11 +333,25 @@ where
 
     // Retain the complete rotated pair across polls until persistence succeeds.
     // Never replace an unreadable/changed file using a stale comparison.
-    let unchanged = std::fs::read_to_string(path).map(|raw| raw == raw2).unwrap_or(false);
+    let unchanged = std::fs::read_to_string(path)
+        .map(|raw| raw == raw2)
+        .unwrap_or(false);
     if unchanged && write_back(path, &doc, rename_attempts, rename_delay_ms).is_ok() {
-        pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
+        pending_writes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(path);
     } else {
-        pending_writes().lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_path_buf(), PendingWrite { original: raw2, doc });
+        pending_writes()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                path.to_path_buf(),
+                PendingWrite {
+                    original: raw2,
+                    doc,
+                },
+            );
     }
     Ok((rr.access_token, "official"))
 }
@@ -355,11 +403,30 @@ pub(crate) mod tests {
         let dir = tempdir("pending-recovery");
         let p = dir.join("cred.json");
         write_cred(&p, "old", "old-rt", 1);
-        let (first, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { Ok(ok_result("rotated")) }, 0, 0).await.unwrap();
+        let (first, _) =
+            resolve_oauth_token_with(&p, &SPEC, |_| async { Ok(ok_result("rotated")) }, 0, 0)
+                .await
+                .unwrap();
         assert_eq!(first, "rotated");
-        let (second, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { panic!("must reuse pending token") }, 0, 0).await.unwrap();
+        let (second, _) = resolve_oauth_token_with(
+            &p,
+            &SPEC,
+            |_| async { panic!("must reuse pending token") },
+            0,
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(second, "rotated");
-        let (third, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { panic!("must persist without refreshing") }, 1, 0).await.unwrap();
+        let (third, _) = resolve_oauth_token_with(
+            &p,
+            &SPEC,
+            |_| async { panic!("must persist without refreshing") },
+            1,
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(third, "rotated");
         let (_, doc) = read_doc(&p).unwrap();
         assert_eq!(doc["refresh_token"], "rotated-rt");
@@ -371,9 +438,14 @@ pub(crate) mod tests {
         let dir = tempdir("pending-cli");
         let p = dir.join("cred.json");
         write_cred(&p, "old", "rt", 1);
-        resolve_oauth_token_with(&p, &SPEC, |_| async { Ok(ok_result("ours")) }, 0, 0).await.unwrap();
+        resolve_oauth_token_with(&p, &SPEC, |_| async { Ok(ok_result("ours")) }, 0, 0)
+            .await
+            .unwrap();
         write_cred(&p, "cli", "cli-rt", now_secs() + 3600);
-        let (token, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { panic!("CLI wins") }, 1, 0).await.unwrap();
+        let (token, _) =
+            resolve_oauth_token_with(&p, &SPEC, |_| async { panic!("CLI wins") }, 1, 0)
+                .await
+                .unwrap();
         assert_eq!(token, "cli");
         assert!(!pending_writes().lock().unwrap().contains_key(&p));
     }
@@ -383,15 +455,31 @@ pub(crate) mod tests {
         let dir = tempdir("pending-expired");
         let p = dir.join("cred.json");
         write_cred(&p, "old", "old-rt", 1);
-        resolve_oauth_token_with(&p, &SPEC, |_| async {
-            let mut result = ok_result("rotated");
-            result.expires_in_secs = Some(0);
-            Ok(result)
-        }, 0, 0).await.unwrap();
-        let (token, _) = resolve_oauth_token_with(&p, &SPEC, |rt| async move {
-            assert_eq!(rt, "rotated-rt");
-            Ok(ok_result("renewed"))
-        }, 0, 0).await.unwrap();
+        resolve_oauth_token_with(
+            &p,
+            &SPEC,
+            |_| async {
+                let mut result = ok_result("rotated");
+                result.expires_in_secs = Some(0);
+                Ok(result)
+            },
+            0,
+            0,
+        )
+        .await
+        .unwrap();
+        let (token, _) = resolve_oauth_token_with(
+            &p,
+            &SPEC,
+            |rt| async move {
+                assert_eq!(rt, "rotated-rt");
+                Ok(ok_result("renewed"))
+            },
+            0,
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(token, "renewed");
     }
 
@@ -411,7 +499,10 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(t, "new");
         let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "a rotated token must not widen the credential file");
+        assert_eq!(
+            mode, 0o600,
+            "a rotated token must not widen the credential file"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -476,7 +567,11 @@ pub(crate) mod tests {
         for h in handles {
             assert_eq!(h.await.unwrap().unwrap().0, "shared-token");
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "refresh must be single-flight");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "refresh must be single-flight"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -501,7 +596,10 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(t, "cli-token", "must adopt the CLI's concurrent refresh");
         let raw = std::fs::read_to_string(&p).unwrap();
-        assert!(raw.contains("cli-token"), "file must keep the CLI's content");
+        assert!(
+            raw.contains("cli-token"),
+            "file must keep the CLI's content"
+        );
         assert!(!raw.contains("our-token"), "our pair must be dropped");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -532,11 +630,9 @@ pub(crate) mod tests {
         let dir = tempdir("invalidgrant2");
         let p = dir.join("cred.json");
         write_cred(&p, "old", "rt", now_secs() - 10);
-        let err = resolve_oauth_token(&p, &SPEC, |_| async {
-            Err(RefreshFailure::InvalidGrant)
-        })
-        .await
-        .unwrap_err();
+        let err = resolve_oauth_token(&p, &SPEC, |_| async { Err(RefreshFailure::InvalidGrant) })
+            .await
+            .unwrap_err();
         assert!(matches!(err, ProviderError::AuthExpired));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -603,11 +699,9 @@ pub(crate) mod tests {
             }
         });
         for _ in 0..20 {
-            let (t, _) = resolve_oauth_token(&p, &SPEC, |_| async {
-                Ok(ok_result("ours"))
-            })
-            .await
-            .expect("resolve must not fail during a CLI rewrite storm");
+            let (t, _) = resolve_oauth_token(&p, &SPEC, |_| async { Ok(ok_result("ours")) })
+                .await
+                .expect("resolve must not fail during a CLI rewrite storm");
             assert!(!t.is_empty());
             // the file must never be left unreadable beyond the torn-read window
             assert!(read_doc(&p).is_ok());
@@ -619,7 +713,10 @@ pub(crate) mod tests {
         }
         stop.store(1, Ordering::SeqCst);
         storm.join().unwrap();
-        assert!(written.load(Ordering::SeqCst) > 10, "storm must actually have written");
+        assert!(
+            written.load(Ordering::SeqCst) > 10,
+            "storm must actually have written"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -637,7 +734,10 @@ pub(crate) mod tests {
                 Ok(ok_result("x"))
             }))
             .unwrap_err();
-        assert!(matches!(err, ProviderError::CredentialCorrupt { torn: true }));
+        assert!(matches!(
+            err,
+            ProviderError::CredentialCorrupt { torn: true }
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

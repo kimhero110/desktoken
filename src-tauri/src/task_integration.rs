@@ -15,10 +15,7 @@ pub struct Integration {
 /// e.g. C:\%APPDATA%-style dirs could be rewritten into a different command).
 /// All other filename-legal characters are inert inside double quotes.
 fn windows_exe_path_is_safe(exe: &str) -> Result<(), String> {
-    if exe
-        .chars()
-        .any(|c| c.is_control() || c == '"' || c == '%')
-    {
+    if exe.chars().any(|c| c.is_control() || c == '"' || c == '%') {
         return Err(format!(
             "应用路径包含 Windows 命令行不安全字符（引号/百分号/控制字符），已拒绝生成 hook 命令：{exe}"
         ));
@@ -34,7 +31,11 @@ fn command(exe: &str, tool: &str, windows: bool) -> Result<String, String> {
         // no encoded commands). Host stdin/stdout pass through unchanged.
         Ok(format!("\"{exe}\" task-event {tool}"))
     } else {
-        Ok(format!("'{}' task-event {}", exe.replace('\'', "'\"'\"'"), tool))
+        Ok(format!(
+            "'{}' task-event {}",
+            exe.replace('\'', "'\"'\"'"),
+            tool
+        ))
     }
 }
 
@@ -103,10 +104,13 @@ pub fn task_integration_config(tool: String) -> Result<Integration, String> {
 
 pub fn default_path(tool: &str) -> Result<std::path::PathBuf, String> {
     let relative = match tool {
-        "codex" => ".codex/hooks.json", "claude" => ".claude/settings.json", "opencode" => ".config/opencode/plugins/quotabar-tasks.js",
+        "codex" => ".codex/hooks.json",
+        "claude" => ".claude/settings.json",
+        "opencode" => ".config/opencode/plugins/quotabar-tasks.js",
         _ => return Err("该工具尚未接入".into()),
     };
-    let home_dir = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok_or("无法确定用户目录")?;
+    let home_dir = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .ok_or("无法确定用户目录")?;
     Ok(std::path::PathBuf::from(home_dir).join(relative))
 }
 
@@ -125,81 +129,154 @@ fn inspect(path: &std::path::Path, expected: &Integration, tool: &str) -> &'stat
         Err(_) => return "unreadable",
     };
     if tool == "opencode" {
-        return if raw.replace("\r\n", "\n") == expected.content.replace("\r\n", "\n") { "matched" } else { "different" };
+        return if raw.replace("\r\n", "\n") == expected.content.replace("\r\n", "\n") {
+            "matched"
+        } else {
+            "different"
+        };
     }
-    let Ok(actual) = serde_json::from_str::<serde_json::Value>(&raw) else { return "invalid"; };
-    if !actual.is_object() { return "invalid"; }
+    let Ok(actual) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return "invalid";
+    };
+    if !actual.is_object() {
+        return "invalid";
+    }
     if let Some(hooks) = actual.get("hooks") {
-        let Some(events) = hooks.as_object() else { return "invalid"; };
+        let Some(events) = hooks.as_object() else {
+            return "invalid";
+        };
         for groups in events.values() {
-            let Some(groups) = groups.as_array() else { return "invalid"; };
+            let Some(groups) = groups.as_array() else {
+                return "invalid";
+            };
             for group in groups {
-                if group.get("matcher").is_some_and(|m| !m.is_string()) || group.get("hooks").and_then(|h| h.as_array()).is_none() { return "invalid"; }
+                if group.get("matcher").is_some_and(|m| !m.is_string())
+                    || group.get("hooks").and_then(|h| h.as_array()).is_none()
+                {
+                    return "invalid";
+                }
             }
         }
     }
     let wanted: serde_json::Value = serde_json::from_str(&expected.content).unwrap_or_default();
-    let Some(events) = wanted["hooks"].as_object() else { return "invalid"; };
-    let count = events.iter().filter(|(event, groups)| {
-        let expected_hook = &groups[0]["hooks"][0];
-        actual["hooks"].get(*event).and_then(|v| v.as_array()).is_some_and(|groups| groups.iter().any(|g| {
-            // A restrictive matcher can silently miss events, even with the correct command.
-            let all = g.get("matcher").and_then(|v| v.as_str()).is_none_or(|m| m.is_empty() || m == "*");
-            all && g["hooks"].as_array().is_some_and(|hooks| hooks.iter().any(|h| {
-                h["type"] == "command" && h["command"] == expected_hook["command"]
-                    && h.get("commandWindows") == expected_hook.get("commandWindows")
-                    && h.get("args") == expected_hook.get("args")
-            }))
-        }))
-    }).count();
-    if count == events.len() { "matched" } else if count > 0 { "partial" } else { "different" }
+    let Some(events) = wanted["hooks"].as_object() else {
+        return "invalid";
+    };
+    let count = events
+        .iter()
+        .filter(|(event, groups)| {
+            let expected_hook = &groups[0]["hooks"][0];
+            actual["hooks"]
+                .get(*event)
+                .and_then(|v| v.as_array())
+                .is_some_and(|groups| {
+                    groups.iter().any(|g| {
+                        // A restrictive matcher can silently miss events, even with the correct command.
+                        let all = g
+                            .get("matcher")
+                            .and_then(|v| v.as_str())
+                            .is_none_or(|m| m.is_empty() || m == "*");
+                        all && g["hooks"].as_array().is_some_and(|hooks| {
+                            hooks.iter().any(|h| {
+                                h["type"] == "command"
+                                    && h["command"] == expected_hook["command"]
+                                    && h.get("commandWindows")
+                                        == expected_hook.get("commandWindows")
+                                    && h.get("args") == expected_hook.get("args")
+                            })
+                        })
+                    })
+                })
+        })
+        .count();
+    if count == events.len() {
+        "matched"
+    } else if count > 0 {
+        "partial"
+    } else {
+        "different"
+    }
 }
 
 #[tauri::command]
 pub fn task_integration_status() -> Result<Vec<IntegrationStatus>, String> {
-    let home_dir = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok_or("无法确定用户目录")?;
+    let home_dir = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .ok_or("无法确定用户目录")?;
     let root = std::path::PathBuf::from(home_dir);
     let tasks = crate::task_monitor::list_tasks();
-    let rows = [ ("codex", ".codex/hooks.json"), ("claude", ".claude/settings.json"), ("opencode", ".config/opencode/plugins/quotabar-tasks.js") ]
-        .into_iter().map(|(tool, relative)| {
-            let path = root.join(relative);
-            // A per-tool failure disables that row only. Collecting into a
-            // Result meant one rejected path (the codex command guard refuses
-            // a `%`, which cmd expands even inside quotes) hid the claude and
-            // opencode rows too, though neither uses that command form.
-            let config = match task_integration_config(tool.into()) {
-                Ok(expected) => inspect(&path, &expected, tool).to_string(),
-                Err(e) => e,
-            };
-            IntegrationStatus {
-                tool: tool.into(), path: path.to_string_lossy().into_owned(), config,
-                last_event_at: tasks.iter().filter(|t| t.tool == tool).map(|t| t.updated_at).max(),
-            }
-        }).collect();
+    let rows = [
+        ("codex", ".codex/hooks.json"),
+        ("claude", ".claude/settings.json"),
+        ("opencode", ".config/opencode/plugins/quotabar-tasks.js"),
+    ]
+    .into_iter()
+    .map(|(tool, relative)| {
+        let path = root.join(relative);
+        // A per-tool failure disables that row only. Collecting into a
+        // Result meant one rejected path (the codex command guard refuses
+        // a `%`, which cmd expands even inside quotes) hid the claude and
+        // opencode rows too, though neither uses that command form.
+        let config = match task_integration_config(tool.into()) {
+            Ok(expected) => inspect(&path, &expected, tool).to_string(),
+            Err(e) => e,
+        };
+        IntegrationStatus {
+            tool: tool.into(),
+            path: path.to_string_lossy().into_owned(),
+            config,
+            last_event_at: tasks
+                .iter()
+                .filter(|t| t.tool == tool)
+                .map(|t| t.updated_at)
+                .max(),
+        }
+    })
+    .collect();
     Ok(rows)
 }
 
 pub fn handle_cli() -> bool {
     let args: Vec<_> = std::env::args().collect();
-    if matches!(args.get(1).map(String::as_str), Some("task-install" | "task-remove")) {
-        let result = (|| -> Result<crate::task_install::InstallResult,String> {
-            if args.len() != 4 { return Err("用法：task-install|task-remove codex|claude|opencode 接收程序绝对路径".into()); }
-            let receiver=std::path::Path::new(&args[3]);
-            if !receiver.is_absolute() || !receiver.is_file() { return Err("接收程序必须是已存在文件的绝对路径".into()); }
-            let path=default_path(&args[2])?;
-            let config=generate(&args[3],&args[2],cfg!(windows))?;
-            crate::task_install::change(&path,&args[2],&config.content,args[1]=="task-install")
+    if matches!(
+        args.get(1).map(String::as_str),
+        Some("task-install" | "task-remove")
+    ) {
+        let result = (|| -> Result<crate::task_install::InstallResult, String> {
+            if args.len() != 4 {
+                return Err(
+                    "用法：task-install|task-remove codex|claude|opencode 接收程序绝对路径".into(),
+                );
+            }
+            let receiver = std::path::Path::new(&args[3]);
+            if !receiver.is_absolute() || !receiver.is_file() {
+                return Err("接收程序必须是已存在文件的绝对路径".into());
+            }
+            let path = default_path(&args[2])?;
+            let config = generate(&args[3], &args[2], cfg!(windows))?;
+            crate::task_install::change(&path, &args[2], &config.content, args[1] == "task-install")
         })();
         match result {
-            Ok(report)=>println!("{}",serde_json::to_string(&report).unwrap_or_default()),
-            Err(error)=>{eprintln!("{error}");std::process::exit(1);}
+            Ok(report) => println!("{}", serde_json::to_string(&report).unwrap_or_default()),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
         }
         return true;
     }
-    if args.get(1).map(String::as_str) != Some("task-config") { return false; }
-    match args.get(2).ok_or_else(|| "需要工具名".to_string()).and_then(|t| task_integration_config(t.clone())) {
+    if args.get(1).map(String::as_str) != Some("task-config") {
+        return false;
+    }
+    match args
+        .get(2)
+        .ok_or_else(|| "需要工具名".to_string())
+        .and_then(|t| task_integration_config(t.clone()))
+    {
         Ok(config) => println!("{}", serde_json::to_string(&config).unwrap_or_default()),
-        Err(error) => { eprintln!("{error}"); std::process::exit(1); }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
     }
     true
 }
@@ -213,35 +290,45 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.json");
         let expected = generate("test.exe", "codex", true).unwrap();
-        assert_eq!(inspect(&dir.join("missing.json"), &expected, "codex"), "missing");
-        std::fs::write(&path,"{").unwrap();
-        assert_eq!(inspect(&path,&expected,"codex"),"invalid");
-        std::fs::write(&path,&expected.content).unwrap();
-        assert_eq!(inspect(&path,&expected,"codex"),"matched");
-        let mut malformed:serde_json::Value=serde_json::from_str(&expected.content).unwrap();
-        malformed["hooks"]["Stop"][0]["matcher"]=json!(42);
-        std::fs::write(&path,malformed.to_string()).unwrap();
-        assert_eq!(inspect(&path,&expected,"codex"),"invalid");
-        let mut v:serde_json::Value=serde_json::from_str(&expected.content).unwrap();
-        v["hooks"]["PreToolUse"][0]["matcher"]=json!("OnlyOneTool");
-        std::fs::write(&path,v.to_string()).unwrap();
-        assert_eq!(inspect(&path,&expected,"codex"),"partial");
+        assert_eq!(
+            inspect(&dir.join("missing.json"), &expected, "codex"),
+            "missing"
+        );
+        std::fs::write(&path, "{").unwrap();
+        assert_eq!(inspect(&path, &expected, "codex"), "invalid");
+        std::fs::write(&path, &expected.content).unwrap();
+        assert_eq!(inspect(&path, &expected, "codex"), "matched");
+        let mut malformed: serde_json::Value = serde_json::from_str(&expected.content).unwrap();
+        malformed["hooks"]["Stop"][0]["matcher"] = json!(42);
+        std::fs::write(&path, malformed.to_string()).unwrap();
+        assert_eq!(inspect(&path, &expected, "codex"), "invalid");
+        let mut v: serde_json::Value = serde_json::from_str(&expected.content).unwrap();
+        v["hooks"]["PreToolUse"][0]["matcher"] = json!("OnlyOneTool");
+        std::fs::write(&path, v.to_string()).unwrap();
+        assert_eq!(inspect(&path, &expected, "codex"), "partial");
         let old = generate("moved.exe", "codex", true).unwrap();
-        std::fs::write(&path,&old.content).unwrap();
-        assert_eq!(inspect(&path,&expected,"codex"),"different");
+        std::fs::write(&path, &old.content).unwrap();
+        assert_eq!(inspect(&path, &expected, "codex"), "different");
         std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn config_is_passive_and_handles_path_metacharacters() {
         let config = generate("C:\\a b\\O'Brien $x\\quotabar.exe", "codex", true).unwrap();
         let v: serde_json::Value = serde_json::from_str(&config.content).unwrap();
-        assert!(v["hooks"]["Stop"][0]["hooks"][0].get("command_windows").is_none());
-        assert!(v["hooks"]["Stop"][0]["hooks"][0].get("commandWindows").is_some());
+        assert!(v["hooks"]["Stop"][0]["hooks"][0]
+            .get("command_windows")
+            .is_none());
+        assert!(v["hooks"]["Stop"][0]["hooks"][0]
+            .get("commandWindows")
+            .is_some());
         let cmd = v["hooks"]["Stop"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
         // Direct quoted native executable, no PowerShell, no encoding
-        assert_eq!(cmd, "\"C:\\a b\\O'Brien $x\\quotabar.exe\" task-event codex");
+        assert_eq!(
+            cmd,
+            "\"C:\\a b\\O'Brien $x\\quotabar.exe\" task-event codex"
+        );
         assert!(!cmd.to_lowercase().contains("powershell"));
         assert!(!cmd.contains("-EncodedCommand"));
         // unsafe path characters are rejected instead of mis-quoting
