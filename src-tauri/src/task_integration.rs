@@ -160,15 +160,23 @@ pub fn task_integration_status() -> Result<Vec<IntegrationStatus>, String> {
     let home_dir = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok_or("无法确定用户目录")?;
     let root = std::path::PathBuf::from(home_dir);
     let tasks = crate::task_monitor::list_tasks();
-    [ ("codex", ".codex/hooks.json"), ("claude", ".claude/settings.json"), ("opencode", ".config/opencode/plugins/quotabar-tasks.js") ]
+    let rows = [ ("codex", ".codex/hooks.json"), ("claude", ".claude/settings.json"), ("opencode", ".config/opencode/plugins/quotabar-tasks.js") ]
         .into_iter().map(|(tool, relative)| {
             let path = root.join(relative);
-            let expected = task_integration_config(tool.into())?;
-            Ok(IntegrationStatus {
-                tool: tool.into(), path: path.to_string_lossy().into_owned(), config: inspect(&path, &expected, tool).into(),
+            // A per-tool failure disables that row only. Collecting into a
+            // Result meant one rejected path (the codex command guard refuses
+            // a `%`, which cmd expands even inside quotes) hid the claude and
+            // opencode rows too, though neither uses that command form.
+            let config = match task_integration_config(tool.into()) {
+                Ok(expected) => inspect(&path, &expected, tool).to_string(),
+                Err(e) => e,
+            };
+            IntegrationStatus {
+                tool: tool.into(), path: path.to_string_lossy().into_owned(), config,
                 last_event_at: tasks.iter().filter(|t| t.tool == tool).map(|t| t.updated_at).max(),
-            })
-        }).collect()
+            }
+        }).collect();
+    Ok(rows)
 }
 
 pub fn handle_cli() -> bool {

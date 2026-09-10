@@ -107,7 +107,11 @@ fn discover_ls() -> Option<LsEndpoint> {
         };
         let ports = loopback_listen_ports(pid as u32);
         if ports.is_empty() {
-            return None;
+            // A zombie LS from a previous IDE session, or one that has not
+            // bound its listener yet. Keep looking, like every other rejection
+            // in this loop: returning here reported IdeNotRunning whenever WMI
+            // happened to enumerate the dead process first.
+            continue;
         }
         return Some(LsEndpoint { ports, csrf });
     }
@@ -138,6 +142,7 @@ fn loopback_listen_ports(pid: u32) -> Vec<u16> {
     };
     // Reasonable allocation ceiling: the listener table is tiny in practice.
     const MAX_TABLE_BYTES: u32 = 4 * 1024 * 1024;
+    const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
     let mut size = 0u32;
     unsafe {
         GetExtendedTcpTable(
@@ -149,25 +154,36 @@ fn loopback_listen_ports(pid: u32) -> Vec<u16> {
             0,
         );
     }
-    if size == 0 || size > MAX_TABLE_BYTES {
-        return vec![];
-    }
-    // u32-aligned storage: the table is a u32 length + u32 rows, and Vec<u32>
-    // guarantees the alignment GetExtendedTcpTable writes require.
-    let mut buf: Vec<u32> = vec![0; size.div_ceil(4) as usize];
-    let rc = unsafe {
-        GetExtendedTcpTable(
-            buf.as_mut_ptr().cast(),
-            &mut size,
-            0,
-            2, // AF_INET
-            TCP_TABLE_OWNER_PID_LISTENER,
-            0,
-        )
+    // The listener table can grow between sizing and reading; the read then
+    // fails with ERROR_INSUFFICIENT_BUFFER and an updated `size`. Giving up
+    // reported "Antigravity 未运行" because some other process happened to
+    // open a socket mid-call.
+    let mut attempt = 0;
+    let buf: Vec<u32> = loop {
+        if size == 0 || size > MAX_TABLE_BYTES {
+            return vec![];
+        }
+        // u32-aligned storage: the table is a u32 length + u32 rows, and
+        // Vec<u32> guarantees the alignment GetExtendedTcpTable requires.
+        let mut buf: Vec<u32> = vec![0; size.div_ceil(4) as usize];
+        let rc = unsafe {
+            GetExtendedTcpTable(
+                buf.as_mut_ptr().cast(),
+                &mut size,
+                0,
+                2, // AF_INET
+                TCP_TABLE_OWNER_PID_LISTENER,
+                0,
+            )
+        };
+        if rc == 0 {
+            break buf;
+        }
+        attempt += 1;
+        if rc != ERROR_INSUFFICIENT_BUFFER || attempt >= 3 {
+            return vec![];
+        }
     };
-    if rc != 0 {
-        return vec![];
-    }
     let table = buf.as_ptr().cast::<MIB_TCPTABLE_OWNER_PID>();
     let count = unsafe { (*table).dwNumEntries } as usize;
     // dwNumEntries is kernel-snapshot data; never trust it beyond the buffer
