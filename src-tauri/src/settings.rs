@@ -148,7 +148,11 @@ pub fn load() -> Settings {
         let legacy = legacy_settings_path();
         if let Ok(raw) = std::fs::read_to_string(&legacy) {
             if let Ok(s) = serde_json::from_str::<Settings>(&raw) {
-                let _ = save(&s); // persist to the new location
+                // save_locked, not save: load() is called from inside edit(),
+                // which already holds WRITE_LOCK, and the mutex is not
+                // reentrant. Two concurrent first-run migrations would write
+                // identical bytes, so skipping the lock here is safe.
+                let _ = save_locked(&s); // persist to the new location
                 return s;
             }
         }
@@ -166,41 +170,21 @@ pub fn load() -> Settings {
     }
 }
 
-/// Atomic write: temp file + rename, retry 6× with 100ms×2^n backoff
-/// (Windows: target held by another process → ERROR_ACCESS_DENIED).
-/// All writes serialize through a process-wide lock — concurrent writers
-/// (poller toast dedup vs UI toggles) used to last-write-win and lose edits.
+/// All writes serialize through this lock. Concurrent writers (poller toast
+/// dedup vs UI toggles) used to last-write-win and lose each other's edits, so
+/// edit()/try_edit() are the only way in: a bare load-modify-save pair from a
+/// command raced the poller.
 static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-pub fn save(s: &Settings) -> std::io::Result<()> {
-    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    save_locked(s)
-}
-
-/// Write without taking WRITE_LOCK — caller must hold it. (edit() holds the
-/// lock across read-modify-write; Mutex is not reentrant, so routing edit()
-/// through save() self-deadlocked — regression test: edit_roundtrip.)
+/// Atomic write: temp file + rename, retry 6× with 100ms×2^n backoff
+/// (Windows: target held by another process → ERROR_ACCESS_DENIED).
+/// Does NOT take WRITE_LOCK — callers hold it, and the mutex is not reentrant.
 fn save_locked(s: &Settings) -> std::io::Result<()> {
     let path = settings_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    let data = serde_json::to_vec_pretty(s)?;
-    std::fs::write(&tmp, data)?;
-    let mut delay = std::time::Duration::from_millis(100);
-    let mut last_err = None;
-    for _ in 0..6 {
-        match std::fs::rename(&tmp, &path) {
-            Ok(_) => return Ok(()),
-            Err(e) => {
-                last_err = Some(e);
-                std::thread::sleep(delay);
-                delay *= 2;
-            }
-        }
-    }
-    Err(last_err.unwrap())
+    crate::atomic_file::replace(&path, &serde_json::to_vec_pretty(s)?, 6, 100)
 }
 
 /// Read-modify-write under the write lock: the only safe way to edit settings
@@ -224,10 +208,10 @@ pub fn try_edit(f: impl FnOnce(&mut Settings)) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    /// Regression: ba6de99 made both edit() and save() take the non-reentrant
-    /// WRITE_LOCK; edit() calling save() self-deadlocked, so every successful
-    /// provider poll froze before emit and the bar never updated. Fail fast
-    /// instead of hanging the suite if this ever comes back.
+    /// Regression: ba6de99 had edit() take the non-reentrant WRITE_LOCK and
+    /// then call a save() that took it again, so every successful provider
+    /// poll froze before emit and the bar never updated. Fail fast instead of
+    /// hanging the suite if this ever comes back.
     #[test]
     fn edit_roundtrip_no_deadlock() {
         let h = std::thread::spawn(|| super::edit(|s| s.opacity));

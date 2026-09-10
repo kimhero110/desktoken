@@ -934,19 +934,21 @@ fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider
             credentials::keyring_set(&format!("custom/{}", def.id), &k)?;
         }
     }
-    let mut s = settings::load();
-    s.custom_providers.retain(|p| p.id != def.id);
-    s.custom_providers.push(def);
-    settings::save(&s).map_err(|e| e.to_string())?;
+    // try_edit, not a load/save pair: the poller edits settings concurrently
+    // (toast dedup), and a read-modify-write outside WRITE_LOCK drops one side.
+    settings::try_edit(move |s| {
+        s.custom_providers.retain(|p| p.id != def.id);
+        s.custom_providers.push(def);
+    })
+    .map_err(|e| e.to_string())?;
     poller::sync(app); // hot reload
     Ok(())
 }
 
 #[tauri::command]
 fn delete_custom_provider(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let mut s = settings::load();
-    s.custom_providers.retain(|p| p.id != id);
-    settings::save(&s).map_err(|e| e.to_string())?;
+    settings::try_edit(|s| s.custom_providers.retain(|p| p.id != id))
+        .map_err(|e| e.to_string())?;
     let _ = credentials::keyring_delete(&format!("custom/{}", id));
     poller::sync(app); // hot reload
     Ok(())
@@ -1077,9 +1079,7 @@ fn main() {
             // Fallback per design tokens: if acrylic fails, raise opacity to 0.88.
             #[cfg(target_os = "windows")]
             if window_vibrancy::apply_acrylic(&window, Some((18, 18, 22, 184))).is_err() {
-                let mut s2 = s.clone();
-                s2.opacity = 0.88;
-                let _ = settings::save(&s2);
+                let _ = settings::try_edit(|s| s.opacity = 0.88);
             }
             #[cfg(target_os = "macos")]
             if window_vibrancy::apply_vibrancy(
