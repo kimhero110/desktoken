@@ -207,28 +207,28 @@
       const instRows = myInstances.map(i => {
         const on = !settings.disabled_instances.includes(i.id);
         return `<div class="row" style="margin-top:6px; padding-left:22px;">
-          <input type="checkbox" ${on ? "checked" : ""} data-inst="${i.id}" class="inst-toggle" />
-          <label for="" style="margin:0">${i.name}</label>
+          <input type="checkbox" ${on ? "checked" : ""} data-inst="${escapeHtml(i.id)}" class="inst-toggle" />
+          <label for="" style="margin:0">${escapeHtml(i.name)}</label>
         </div>`;
       }).join("");
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
         <div class="head">
-          <input type="checkbox" ${enabled ? "checked" : ""} data-id="${p.id}" class="enable" />
-          <span class="name">${p.name}</span>
+          <input type="checkbox" ${enabled ? "checked" : ""} data-id="${escapeHtml(p.id)}" class="enable" />
+          <span class="name">${escapeHtml(p.name)}</span>
           <span class="status ${p.status}">${p.status === "auto" ? "✓ 自动检测" : p.status === "manual" ? "✓ 手动 key" : "未配置"}</span>
         </div>
-        <div class="note">${p.detail}</div>
+        <div class="note">${escapeHtml(p.detail)}</div>
         ${myInstances.length > 1 ? `<div class="note" style="margin-top:6px;">本机发现 ${myInstances.length} 个账号（同屏各自显示）：</div>${instRows}` : ""}
         ${p.supports_manual_key ? `
         <div class="keyrow">
-          <input type="password" placeholder="粘贴 API key" data-key="${p.id}" class="mono" />
-          <button data-save="${p.id}">保存</button>
-          <button class="ghost" data-verify="${p.id}">验证</button>
-          <button class="danger" data-del="${p.id}">删除</button>
+          <input type="password" placeholder="粘贴 API key" data-key="${escapeHtml(p.id)}" class="mono" />
+          <button data-save="${escapeHtml(p.id)}">保存</button>
+          <button class="ghost" data-verify="${escapeHtml(p.id)}">验证</button>
+          <button class="danger" data-del="${escapeHtml(p.id)}">删除</button>
         </div>
-        <div class="verify-result" id="vr-${p.id}"></div>` : ""}
+        <div class="verify-result" id="vr-${escapeHtml(p.id)}"></div>` : ""}
       `;
       wrap.appendChild(card);
     }

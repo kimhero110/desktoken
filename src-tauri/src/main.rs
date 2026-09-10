@@ -481,19 +481,34 @@ fn check_update_cmd(app: tauri::AppHandle) {
 #[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    // allowlist: our repo pages + official provider consoles (detail card links)
-    const ALLOWED: &[&str] = &[
-        "https://github.com/kimhero110/desktoken",
-        "https://platform.moonshot.cn",
-        "https://open.bigmodel.cn",
-        "https://chatgpt.com",
-        "https://claude.ai",
-        "https://antigravity.google",
-    ];
-    if !ALLOWED.iter().any(|p| url.starts_with(p)) {
+    if !url_is_allowed(&url) {
         return Err("不允许的链接".into());
     }
     app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Allowlist for open_url: our repo pages + the official provider consoles the
+/// detail card links to. Exact host plus a path prefix — a bare starts_with on
+/// the URL string let https://claude.ai.example.com/ through, and matching
+/// github.com by host alone would open any repository.
+fn url_is_allowed(url: &str) -> bool {
+    const ALLOWED: &[(&str, &str)] = &[
+        ("github.com", "/kimhero110/desktoken/"),
+        ("platform.moonshot.cn", "/"),
+        ("open.bigmodel.cn", "/"),
+        ("chatgpt.com", "/"),
+        ("claude.ai", "/"),
+        ("antigravity.google", "/"),
+    ];
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    parsed.scheme() == "https"
+        && parsed.host_str().is_some_and(|host| {
+            ALLOWED
+                .iter()
+                .any(|(h, prefix)| host == *h && parsed.path().starts_with(prefix))
+        })
 }
 
 /// E8: 7-day usage history for the detail card sparklines.
@@ -927,6 +942,17 @@ fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider
     if def.name.trim().is_empty() || def.endpoint.trim().is_empty() {
         return Err("名称与端点 URL 不能为空".into());
     }
+    // The key travels to this endpoint on every poll, and the settings page
+    // gave no hint that http:// means plaintext. Loopback stays allowed so
+    // local and self-hosted monitors still work.
+    let endpoint = reqwest::Url::parse(def.endpoint.trim()).map_err(|_| "端点 URL 无效")?;
+    let loopback = matches!(
+        endpoint.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("[::1]")
+    );
+    if !(endpoint.scheme() == "https" || (endpoint.scheme() == "http" && loopback)) {
+        return Err("端点必须使用 https（本机 http://127.0.0.1 除外）：API key 会随请求发送".into());
+    }
     def.poll_minutes = def.poll_minutes.clamp(1, 1440);
     if let Some(k) = &key {
         let k = credentials::normalize_key(k);
@@ -1192,6 +1218,33 @@ fn main() {
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+    /// Regression: the allowlist matched bare URL prefixes with starts_with,
+    /// so a lookalike host that merely began with an allowed origin passed.
+    #[test]
+    fn open_url_allowlist_matches_host_not_prefix() {
+        use super::url_is_allowed;
+        // the links the UI actually passes
+        assert!(url_is_allowed("https://claude.ai/settings/usage"));
+        assert!(url_is_allowed("https://platform.moonshot.cn/console"));
+        assert!(url_is_allowed("https://open.bigmodel.cn/"));
+        assert!(url_is_allowed("https://chatgpt.com/codex"));
+        assert!(url_is_allowed("https://antigravity.google"));
+        assert!(url_is_allowed(
+            "https://github.com/kimhero110/desktoken/releases/tag/v0.4.0"
+        ));
+        // lookalike hosts that the old prefix match accepted
+        assert!(!url_is_allowed("https://claude.ai.example.com/steal"));
+        assert!(!url_is_allowed("https://chatgpt.com.example.com/"));
+        assert!(!url_is_allowed(
+            "https://github.com/kimhero110/desktoken-evil/x"
+        ));
+        // other repositories, other schemes, junk
+        assert!(!url_is_allowed("https://github.com/someone/else"));
+        assert!(!url_is_allowed("http://claude.ai/settings/usage"));
+        assert!(!url_is_allowed("file:///etc/passwd"));
+        assert!(!url_is_allowed("not a url"));
+    }
+
     use super::*;
 
     /// T1: every id the menu builds must have a handler branch. A typo in a
