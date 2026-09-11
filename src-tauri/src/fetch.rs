@@ -17,15 +17,83 @@ fn parse_retry_after(value: &str, now: std::time::SystemTime) -> Option<u64> {
     Some(date.timestamp().max(0) as u64).map(|t| t.saturating_sub(now))
 }
 
+/// Product UA carrying the real build version and host platform. The old
+/// literal claimed 0.1.0 on Windows regardless of either.
+fn default_user_agent() -> String {
+    let os = if cfg!(windows) {
+        "Windows NT"
+    } else if cfg!(target_os = "macos") {
+        "Macintosh"
+    } else {
+        std::env::consts::OS
+    };
+    format!(
+        "QuotaBar/{} ({}; {})",
+        env!("CARGO_PKG_VERSION"),
+        os,
+        std::env::consts::ARCH
+    )
+}
+
+/// Follow redirects only inside the origin the request was addressed to.
+/// reqwest strips `Authorization` when a redirect crosses hosts, but not the
+/// custom header names a user picks for their own monitor (`X-API-Key` and
+/// friends) — those would otherwise be replayed to whatever host the endpoint
+/// points at. Cross-origin hops stop and surface the 3xx to the caller.
+fn same_origin_redirects() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        let Some(origin) = attempt.previous().first() else {
+            return attempt.stop();
+        };
+        if attempt.previous().len() >= 5 {
+            return attempt.stop();
+        }
+        let next = attempt.url();
+        let same = next.scheme() == origin.scheme()
+            && next.host_str() == origin.host_str()
+            && next.port_or_known_default() == origin.port_or_known_default();
+        if same {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
 pub fn http_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent("QuotaBar/0.1.0 (Windows NT; x64)")
+            .user_agent(default_user_agent())
+            .redirect(same_origin_redirects())
             .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     })
+}
+
+/// A monitor endpoint carries the user's key on every poll, so it must not be
+/// reachable over cleartext. https anywhere; http only against the loopback
+/// interface, which keeps local mock servers (and these tests) usable.
+pub fn check_endpoint(endpoint: &str) -> Result<(), String> {
+    let url = reqwest::Url::parse(endpoint.trim()).map_err(|_| "端点不是合法的 URL".to_string())?;
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" if is_loopback_host(url.host_str().unwrap_or("")) => Ok(()),
+        "http" => Err("端点必须使用 https，否则 key 会以明文发送（本机 127.0.0.1 例外）".into()),
+        other => Err(format!("不支持的协议: {}", other)),
+    }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
 }
 
 /// jq-lite dotted path: "data.limits.0.percentage" (array index as numeric segment).
@@ -69,6 +137,7 @@ pub async fn get_with_auth(
     prefix: &str,
     key: &str,
 ) -> Result<(u16, String, Option<u64>), String> {
+    check_endpoint(endpoint)?;
     get_json(endpoint, &[(header, &format!("{}{}", prefix, key))]).await
 }
 
@@ -222,6 +291,25 @@ mod tests {
     use super::*;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn user_agent_carries_the_real_build_version() {
+        let ua = default_user_agent();
+        assert!(ua.contains(env!("CARGO_PKG_VERSION")), "stale UA: {ua}");
+        assert!(!ua.contains("0.1.0 (Windows NT; x64)"), "hardcoded UA came back: {ua}");
+    }
+
+    #[test]
+    fn cleartext_endpoints_are_refused_outside_loopback() {
+        assert!(check_endpoint("https://api.example.com/quota").is_ok());
+        assert!(check_endpoint("http://127.0.0.1:8080/quota").is_ok());
+        assert!(check_endpoint("http://localhost:8080/quota").is_ok());
+        assert!(check_endpoint("http://[::1]:8080/quota").is_ok());
+        assert!(check_endpoint("http://api.example.com/quota").is_err());
+        assert!(check_endpoint("http://10.0.0.5/quota").is_err());
+        assert!(check_endpoint("file:///etc/passwd").is_err());
+        assert!(check_endpoint("not a url").is_err());
+    }
 
     #[test]
     fn retry_after_seconds_dates_and_invalid_values() {

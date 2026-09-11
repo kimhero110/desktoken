@@ -64,7 +64,7 @@ pub enum RefreshFailure {
 /// failures (Windows MoveFileEx REPLACE_EXISTING has a brief delete+rename
 /// window where the path vanishes) and JSON parse failures (CLI mid-write)
 /// are retried silently; only persistent failure reports an error.
-fn read_doc(path: &Path) -> Result<(String, Value), ProviderError> {
+async fn read_doc(path: &Path) -> Result<(String, Value), ProviderError> {
     let mut last_read_failed = false;
     for attempt in 0..TORN_RETRIES {
         match std::fs::read_to_string(path) {
@@ -78,7 +78,7 @@ fn read_doc(path: &Path) -> Result<(String, Value), ProviderError> {
             Err(_) => last_read_failed = true,
         }
         if attempt + 1 < TORN_RETRIES {
-            std::thread::sleep(std::time::Duration::from_millis(150));
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         }
     }
     if last_read_failed {
@@ -177,20 +177,49 @@ fn pending_writes() -> &'static std::sync::Mutex<std::collections::HashMap<PathB
     PENDING.get_or_init(Default::default)
 }
 
+/// Create the sibling tmp file without widening the credential file's access
+/// control. `std::fs::write` would create it with the umask default (0644 on
+/// macOS) and the rename would then hand that looser mode to a file the CLI
+/// deliberately created as 0600. Windows keeps inheriting the directory ACL
+/// (explicit ACL re-apply is tracked separately in TODOS).
+#[cfg(unix)]
+fn write_tmp_like_target(tmp: &Path, target: &Path, body: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mode = std::fs::metadata(target)
+        .map(|m| m.permissions().mode() & 0o777)
+        .unwrap_or(0o600);
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(mode)
+        .open(tmp)?;
+    f.write_all(body.as_bytes())?;
+    // A tmp file left over from an earlier round keeps its old mode: force it.
+    std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn write_tmp_like_target(tmp: &Path, _target: &Path, body: &str) -> std::io::Result<()> {
+    std::fs::write(tmp, body)
+}
+
 /// Atomic write-back: write sibling tmp file, then rename over the original
 /// with bounded retries (Windows file-lock tolerance). Failure here is NOT
-/// fatal to the caller — the token still works in memory.
-fn write_back(path: &Path, doc: &Value, attempts: u32, base_delay_ms: u64) -> Result<(), ()> {
+/// fatal to the caller — the token still works in memory. The rename backoff
+/// runs up to ~6.3s, so it yields instead of blocking the polling executor.
+async fn write_back(path: &Path, doc: &Value, attempts: u32, base_delay_ms: u64) -> Result<(), ()> {
     let body = serde_json::to_string_pretty(doc).map_err(|_| ())?;
     let tmp = path.with_extension("desktoken-tmp");
-    std::fs::write(&tmp, body).map_err(|_| ())?;
+    write_tmp_like_target(&tmp, path, &body).map_err(|_| ())?;
     let mut delay = std::time::Duration::from_millis(base_delay_ms);
     for attempt in 0..attempts {
         match std::fs::rename(&tmp, path) {
             Ok(_) => return Ok(()),
             Err(_) => {
                 if attempt + 1 < attempts {
-                    std::thread::sleep(delay);
+                    tokio::time::sleep(delay).await;
                     delay *= 2;
                 }
             }
@@ -229,7 +258,7 @@ where
     // Serialize reads, pending retries and refreshes for this credential file.
     let mutex = path_mutex(path);
     let _guard = mutex.lock().await;
-    let current = read_doc(path);
+    let current = read_doc(path).await;
     let pending = pending_writes().lock().unwrap_or_else(|e| e.into_inner()).get(path).cloned();
     let (raw2, doc2) = if let Some(p) = pending {
         match current {
@@ -239,7 +268,7 @@ where
                 (raw, doc)
             }
             Ok((raw, _)) => {
-                if write_back(path, &p.doc, rename_attempts, rename_delay_ms).is_ok() {
+                if write_back(path, &p.doc, rename_attempts, rename_delay_ms).await.is_ok() {
                     pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
                     (serde_json::to_string_pretty(&p.doc).unwrap_or(raw), p.doc)
                 } else {
@@ -269,7 +298,7 @@ where
         Err(RefreshFailure::InvalidGrant) => {
             // The CLI may have rotated the pair concurrently: re-read once
             // before declaring the credential dead.
-            if let Ok((_, doc3)) = read_doc(path) {
+            if let Ok((_, doc3)) = read_doc(path).await {
                 let (a3, _, e3) = extract(&doc3, spec);
                 if let (Some(t), true) = (&a3, is_fresh(e3)) {
                     return Ok((t.clone(), "official"));
@@ -315,7 +344,7 @@ where
     // Retain the complete rotated pair across polls until persistence succeeds.
     // Never replace an unreadable/changed file using a stale comparison.
     let unchanged = std::fs::read_to_string(path).map(|raw| raw == raw2).unwrap_or(false);
-    if unchanged && write_back(path, &doc, rename_attempts, rename_delay_ms).is_ok() {
+    if unchanged && write_back(path, &doc, rename_attempts, rename_delay_ms).await.is_ok() {
         pending_writes().lock().unwrap_or_else(|e| e.into_inner()).remove(path);
     } else {
         pending_writes().lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_path_buf(), PendingWrite { original: raw2, doc });
@@ -376,9 +405,32 @@ pub(crate) mod tests {
         assert_eq!(second, "rotated");
         let (third, _) = resolve_oauth_token_with(&p, &SPEC, |_| async { panic!("must persist without refreshing") }, 1, 0).await.unwrap();
         assert_eq!(third, "rotated");
-        let (_, doc) = read_doc(&p).unwrap();
+        let (_, doc) = read_doc(&p).await.unwrap();
         assert_eq!(doc["refresh_token"], "rotated-rt");
         assert!(!pending_writes().lock().unwrap().contains_key(&p));
+    }
+
+    /// Regression: the CLI creates its credential file as 0600. Write-back
+    /// goes through a tmp file + rename, so a tmp file created with the umask
+    /// default (0644) would silently hand the credential file a looser mode.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_back_must_not_widen_the_credential_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir("mode-preserved");
+        let p = dir.join("cred.json");
+        write_cred(&p, "old", "old-rt", 1);
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let (token, _) =
+            resolve_oauth_token_with(&p, &SPEC, |_| async { Ok(ok_result("rotated")) }, 1, 0)
+                .await
+                .unwrap();
+        assert_eq!(token, "rotated");
+        let (_, doc) = read_doc(&p).await.unwrap();
+        assert_eq!(doc["access_token"], "rotated", "write-back must have happened");
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "write-back widened the credential file mode");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -605,7 +657,7 @@ pub(crate) mod tests {
             .expect("resolve must not fail during a CLI rewrite storm");
             assert!(!t.is_empty());
             // the file must never be left unreadable beyond the torn-read window
-            assert!(read_doc(&p).is_ok());
+            assert!(read_doc(&p).await.is_ok());
         }
         // bounded wait: the storm must actually have overlapped with us
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);

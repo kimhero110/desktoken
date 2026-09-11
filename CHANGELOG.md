@@ -1,5 +1,17 @@
 # Changelog
 
+## 未发布
+
+- 安全：OAuth 写回不再放宽凭据文件权限。此前临时文件由 umask 默认创建（macOS 上 0644），rename 后会覆盖 CLI 建立的 0600；现在临时文件按目标文件原权限创建，并补了回归测试。Windows 侧仍沿用目录 ACL 继承，显式 ACL re-apply 保持在 TODOS。
+- 安全：自定义监视端点强制 https，明文 http 仅对回环地址放行；保存时与请求前各校验一次，旧配置同样覆盖。
+- 安全：共享 HTTP 客户端只在同源内跟随重定向。reqwest 只会在跨主机时剥离 `Authorization`，用户自选的认证头名（如 `X-API-Key`）此前会被带到跳转目标。
+- 安全：`tauri.conf.json` 配置了真实 CSP（此前为 null）。内联脚本仍需 `unsafe-inline`，要去掉得先把内联脚本外置，本次未做。
+- 修复：设置页 provider 卡片的字段统一转义，与自定义监视卡片一致。
+- 修复：OAuth 的撕裂读重试与 rename 退避改用 `tokio::time::sleep`。此前是 `std::thread::sleep`，最长约 6.3 秒占住轮询执行器线程，且持有单飞锁。
+- 修复：User-Agent 按真实版本与平台生成，不再硬编码 `QuotaBar/0.1.0 (Windows NT; x64)`。
+- 修复：capabilities 描述与实际窗口列表一致（sponsor 窗口确实在内，且使用 `close_sponsor`）。
+- 工程：CI 增加 macOS 矩阵（此前只有 Windows，macOS 仅在发版时首次编译）、clippy 步骤（暂不阻断）、cargo-deny 依赖审计与 Dependabot。
+
 ## v0.3.3 (2026-09-09，稳定版)
 
 - 稳定版维护：仅额度功能，Antigravity 探测改原生 WMI/TCP API，自启改 Startup 快捷方式（源自 fix/stable-windows-native，与 beta.3 同源改造；该分支独立于主线，未合并产品代码）。

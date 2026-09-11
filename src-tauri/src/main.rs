@@ -922,6 +922,9 @@ fn save_custom_provider(app: tauri::AppHandle, mut def: settings::CustomProvider
     if def.name.trim().is_empty() || def.endpoint.trim().is_empty() {
         return Err("名称与端点 URL 不能为空".into());
     }
+    def.endpoint = def.endpoint.trim().to_string();
+    // The key rides along on every poll: refuse cleartext before it is stored.
+    fetch::check_endpoint(&def.endpoint)?;
     def.poll_minutes = def.poll_minutes.clamp(1, 1440);
     if let Some(k) = &key {
         let k = credentials::normalize_key(k);

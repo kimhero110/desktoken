@@ -7,10 +7,16 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
@@ -23,12 +29,30 @@ jobs:
         run: |
           cd src-tauri
           cargo test --locked
-      - name: Build (dev, catches windows-specific issues)
+      - name: Build (dev, catches platform-specific issues)
         run: |
           cd src-tauri
           cargo build --locked
+      # Reporting only until the existing lint backlog is cleared; flip
+      # continue-on-error off once `cargo clippy -- -D warnings` is green.
+      - name: Clippy
+        continue-on-error: true
+        run: |
+          cd src-tauri
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Native task lifecycle (isolated, no accounts required)
+        if: runner.os == 'Windows'
         timeout-minutes: 3
         run: |
           node scripts/test-task-bridge.cjs
           node scripts/test-task-lifecycle.cjs
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Advisory and source audit
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check advisories sources
